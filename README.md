@@ -94,6 +94,8 @@ Fitur yang sudah jalan (v1.0.0):
   otomatis saat editor ditutup.
 - **`nxzilla watch [detik]`**: pantau perubahan remote berkala (mode `--once`
   untuk script/CI).
+- **Cache metadata** remote (`.nxzilla-cache.json`) agar `status` berulang cepat;
+  `--refresh` memaksa pemindaian ulang. `push`/`pull` selalu memindai ulang.
 - **Kredensial** tidak disimpan polos (obfuskasi); `NXZILLA_PASSWORD` untuk
   non-interaktif.
 - Fallback teks non-interaktif, `--version`, `--help`. Semua teks UI Inggris.
@@ -112,6 +114,7 @@ nxzilla scan [folder]        # cari folder ber-.nxzilla.json lalu daftarkan
 nxzilla pull                 # tarik perubahan dari server ke folder kerja
 nxzilla push                 # kirim perubahan folder kerja ke server
 nxzilla status               # tampilkan status sinkronisasi (tanpa mengubah)
+nxzilla status --refresh     # paksa pemindaian ulang (abaikan cache)
 nxzilla ls [path]            # daftar isi folder remote (tanpa menarik berkas)
 nxzilla use <nama-profil>    # set profil untuk folder kerja saat ini
 nxzilla ignore <pola>        # tambah pola ignore ke .nxzilla.json

@@ -15,3 +15,4 @@ Thumbs.db
 tui_script.log
 sync_debug.log
 curl_batch.cfg
+.nxzilla-cache.json

@@ -1547,7 +1547,8 @@ static void FillRemoteMeta(const Profile& pr, std::vector<RemoteEntry>& out, boo
 // Pola ignore minimal: cocokkan nama berkas/folder atau akhiran.
 static bool IsIgnored(const std::vector<std::string>& patterns, const std::string& rel) {
     // Selalu abaikan berkas internal Nxzilla.
-    if (rel == ".nxzilla.json" || rel == ".nxzilla-state.json") return true;
+    if (rel == ".nxzilla.json" || rel == ".nxzilla-state.json" ||
+        rel == ".nxzilla-cache.json") return true;
     std::string base = rel;
     size_t s = rel.find_last_of('/');
     if (s != std::string::npos) base = rel.substr(s + 1);
@@ -1651,6 +1652,57 @@ static bool SaveBaseline(const std::string& projectDir, const Baseline& b) {
     return WriteFileText(StatePath(projectDir), j);
 }
 
+// ===========================================================================
+// Cache metadata remote (dipakai status/watch agar tidak selalu LIST+HEAD).
+// ===========================================================================
+struct RemoteCache {
+    long long at = 0;                     // waktu scan (epoch detik)
+    std::vector<RemoteEntry> files;       // rel -> size/mtime
+};
+
+static std::string CachePath(const std::string& projectDir) {
+    std::string p;
+    JoinPath(projectDir, ".nxzilla-cache.json", p);
+    return p;
+}
+
+static RemoteCache LoadCache(const std::string& projectDir) {
+    RemoteCache c;
+    std::string raw = ReadFileText(CachePath(projectDir));
+    if (raw.empty()) return c;
+    JVal root;
+    JParser jp(raw);
+    if (!jp.parse(root)) return c;
+    const JVal* at = root.find("at");
+    c.at = (at && at->type == JVal::NUM) ? (long long)at->number : 0;
+    const JVal* arr = root.arr("files");
+    if (!arr) return c;
+    for (const JVal& e : arr->items) {
+        RemoteEntry x;
+        x.rel = e.str("rel");
+        const JVal* s = e.find("size");
+        const JVal* m = e.find("mtime");
+        x.size = (s && s->type == JVal::NUM) ? (long long)s->number : -1;
+        x.mtime = (m && m->type == JVal::NUM) ? (long long)m->number : 0;
+        if (!x.rel.empty()) c.files.push_back(std::move(x));
+    }
+    return c;
+}
+
+static void SaveCache(const std::string& projectDir, const std::vector<RemoteEntry>& files) {
+    std::string j = "{\n  \"at\": " + std::to_string((long long)time(nullptr)) +
+                    ",\n  \"files\": [\n";
+    for (size_t i = 0; i < files.size(); ++i) {
+        const RemoteEntry& e = files[i];
+        j += "    { \"rel\": \"" + EscapeJson(e.rel) + "\", \"size\": " +
+             std::to_string(e.size) + ", \"mtime\": " + std::to_string(e.mtime) + " }";
+        if (i + 1 < files.size()) j += ",";
+        j += "\n";
+    }
+    j += "  ]\n}\n";
+    WriteFileText(CachePath(projectDir), j);
+}
+
 // Banding peta lokal vs remote. kind: 'A' hanya lokal, 'D' hanya remote, 'M' beda.
 // `base` (bila ada) menentukan konflik: lokal & remote dua-duanya menyimpang
 // dari kondisi terakhir yang sinkron.
@@ -1713,16 +1765,36 @@ static std::vector<DiffItem> DiffTrees(const std::vector<RemoteEntry>& local,
     return out;
 }
 
+// Ambil metadata remote, pakai cache bila masih segar (dan bukan checksum).
+// Mengembalikan true bila remote berhasil disediakan.
+static bool GetRemoteEntries(const Profile& pr, const std::string& remotePath,
+                             const std::string& localDir, bool checksum,
+                             int cacheTtl, std::vector<RemoteEntry>& remote,
+                             std::string& err) {
+    if (!checksum && cacheTtl > 0) {
+        RemoteCache c = LoadCache(localDir);
+        long long now = (long long)time(nullptr);
+        if (c.at > 0 && (now - c.at) <= cacheTtl && !c.files.empty()) {
+            remote = c.files;
+            return true;
+        }
+    }
+    if (!ScanRemote(pr, remotePath, "", 0, remote, err, checksum)) return false;
+    FillRemoteMeta(pr, remote, checksum);
+    if (!checksum) SaveCache(localDir, remote);
+    return true;
+}
+
 // Susun rencana sinkron (dipakai status/pull/push).
+// cacheTtl > 0: izinkan pakai cache metadata remote segar (mis. status/watch).
 static bool BuildPlan(const Profile& pr, const std::string& remotePath,
                       const std::string& localDir,
                       const std::vector<std::string>& ignore,
                       std::vector<DiffItem>& plan, std::string& err,
-                      bool checksum = false) {
+                      bool checksum = false, int cacheTtl = 0) {
     std::vector<RemoteEntry> local, remote;
     ScanLocal(localDir, "", ignore, 0, local, checksum);
-    if (!ScanRemote(pr, remotePath, "", 0, remote, err, checksum)) return false;
-    FillRemoteMeta(pr, remote, checksum);
+    if (!GetRemoteEntries(pr, remotePath, localDir, checksum, cacheTtl, remote, err)) return false;
     Baseline base = LoadBaseline(localDir);
     plan = DiffTrees(local, remote, base, checksum);
     return true;
@@ -1739,6 +1811,7 @@ static void SaveSyncedBaseline(const Profile& pr, const std::string& remotePath,
         std::sort(remote.begin(), remote.end(),
                   [](const RemoteEntry& a, const RemoteEntry& b) { return a.rel < b.rel; });
         SaveBaseline(localDir, remote);
+        SaveCache(localDir, remote);  // cache ikut ter-refresh
     }
 }
 
@@ -2552,6 +2625,8 @@ int main(int argc, char** argv) {
     for (const auto& x : args) if (x == "--dry-run" || x == "-n") dryRun = true;
     bool checksum = false;
     for (const auto& x : args) if (x == "--checksum" || x == "-c") checksum = true;
+    bool refresh = false;
+    for (const auto& x : args) if (x == "--refresh") refresh = true;
 
     if (!args.empty()) {
         const std::string& a = args[0];
@@ -2620,7 +2695,8 @@ int main(int argc, char** argv) {
                 std::vector<std::string> ignore = LoadProjectIgnore(proj->localPath);
                 std::vector<DiffItem> plan;
                 std::string err;
-                if (!BuildPlan(use, effectivePath, proj->localPath, ignore, plan, err, checksum)) {
+                int ttl = (checksum || refresh) ? 0 : 10;  // status: cache 10s
+                if (!BuildPlan(use, effectivePath, proj->localPath, ignore, plan, err, checksum, ttl)) {
                     Out("nxzilla: cannot scan: " + err + "\n");
                     return 1;
                 }
