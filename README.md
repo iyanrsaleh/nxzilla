@@ -96,8 +96,8 @@ Fitur yang sudah jalan (v1.0.0):
   untuk script/CI).
 - **Cache metadata** remote (`.nxzilla-cache.json`) agar `status` berulang cepat;
   `--refresh` memaksa pemindaian ulang. `push`/`pull` selalu memindai ulang.
-- **Kredensial** tidak disimpan polos (obfuskasi); `NXZILLA_PASSWORD` untuk
-  non-interaktif.
+- **Kredensial**: password disimpan di **keyring OS** (Windows Credential Manager;
+  Linux fallback obfuskasi); `NXZILLA_PASSWORD` untuk non-interaktif.
 - Fallback teks non-interaktif, `--version`, `--help`. Semua teks UI Inggris.
 
 Belum ada (rencana): OS keyring (kredensial), `watch`/`edit <file>`, statistik
@@ -162,7 +162,7 @@ Profil koneksi global:
       "host": "nxdom.org",
       "port": 22,                   // ssh: 22, ftp: 21
       "user": "info",
-      "password": "••••••",
+      "password": "",             // kosong: disimpan di keyring OS
       "remotePath": "/var/www/nxdom"
     }
   ]

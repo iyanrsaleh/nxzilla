@@ -51,6 +51,7 @@ static const char* kStatus = "\x1b[1;30;47m";
 #endif
 
 #include <windows.h>
+#include <wincred.h>
 #include <conio.h>
 #include <direct.h>
 #include <io.h>
@@ -721,10 +722,65 @@ static std::string Deobfuscate(const std::string& stored) {
     return out;
 }
 
+// ===========================================================================
+// OS keyring (Windows Credential Manager). Di Linux: fallback obfuskasi.
+// ===========================================================================
+static std::string KeyringTarget(const std::string& profileName) {
+    return "Nxzilla/" + profileName;
+}
+
+// Simpan password ke keyring OS. return true bila berhasil.
+static bool KeyringStore(const std::string& profileName, const std::string& password) {
+#ifdef _WIN32
+    std::string target = KeyringTarget(profileName);
+    CREDENTIALA cred{};
+    cred.Type = CRED_TYPE_GENERIC;
+    cred.TargetName = const_cast<char*>(target.c_str());
+    cred.CredentialBlobSize = (DWORD)password.size();
+    cred.CredentialBlob = (LPBYTE)const_cast<char*>(password.data());
+    cred.Persist = CRED_PERSIST_LOCAL_MACHINE;
+    cred.UserName = const_cast<char*>(profileName.c_str());
+    return CredWriteA(&cred, 0) != 0;
+#else
+    (void)profileName; (void)password;
+    return false;  // Linux: pakai obfuskasi di file
+#endif
+}
+
+// Hapus password dari keyring.
+static void KeyringDelete(const std::string& profileName) {
+#ifdef _WIN32
+    std::string target = KeyringTarget(profileName);
+    CredDeleteA(target.c_str(), CRED_TYPE_GENERIC, 0);
+#else
+    (void)profileName;
+#endif
+}
+
+// Ambil password dari keyring. return "" bila tidak ada.
+static std::string KeyringGet(const std::string& profileName) {
+#ifdef _WIN32
+    std::string target = KeyringTarget(profileName);
+    PCREDENTIALA cred = nullptr;
+    if (!CredReadA(target.c_str(), CRED_TYPE_GENERIC, 0, &cred)) return "";
+    std::string pw;
+    if (cred->CredentialBlob && cred->CredentialBlobSize)
+        pw.assign((char*)cred->CredentialBlob, cred->CredentialBlobSize);
+    CredFree(cred);
+    return pw;
+#else
+    (void)profileName;
+    return "";
+#endif
+}
+
 // Password efektif: env NXZILLA_PASSWORD menang untuk skrip/non-interaktif.
+// Urutan: env -> keyring OS -> nilai di file (obfuskasi/legacy).
 static std::string EffectivePassword(const Profile& p) {
     const char* env = getenv("NXZILLA_PASSWORD");
     if (env && *env) return env;
+    std::string kr = KeyringGet(p.name);
+    if (!kr.empty()) return kr;
     return p.password;
 }
 
@@ -854,7 +910,14 @@ static bool SaveProfiles(const std::vector<Profile>& profiles) {
         j += "      \"host\": \"" + EscapeJson(p.host) + "\",\n";
         j += "      \"port\": " + std::to_string(p.port) + ",\n";
         j += "      \"user\": \"" + EscapeJson(p.user) + "\",\n";
-        j += "      \"password\": \"" + EscapeJson(Obfuscate(p.password)) + "\",\n";
+        // Password disimpan di keyring OS; di file hanya placeholder/obfuskasi
+        // (fallback bila keyring tidak tersedia, mis. Linux tanpa libsecret).
+        std::string stored;
+        if (!p.password.empty()) {
+            if (KeyringStore(p.name, p.password)) stored = "";       // aman di keyring
+            else stored = Obfuscate(p.password);                     // fallback
+        }
+        j += "      \"password\": \"" + EscapeJson(stored) + "\",\n";
         j += "      \"key\": \"" + EscapeJson(p.key) + "\",\n";
         j += "      \"remotePath\": \"" + EscapeJson(p.remotePath) + "\"\n";
         j += "    }";
@@ -1941,8 +2004,10 @@ static void StartForm(AppState& st, int kind, int editIndex) {
         if (kind == FORM_EDIT_PROFILE && editIndex >= 0 &&
             editIndex < (int)st.profiles.size()) {
             const Profile& p = st.profiles[editIndex];
+            std::string pw = p.password;
+            if (pw.empty()) pw = KeyringGet(p.name);  // dari keyring OS
             fm.values = {p.name, p.protocol, p.host, std::to_string(p.port),
-                         p.user, p.password, p.remotePath};
+                         p.user, pw, p.remotePath};
         } else {
             fm.values = {"", "ftp", "", "21", "", "", ""};
         }
@@ -2513,6 +2578,7 @@ static int RunTui(AppState& st, bool resetStatus = true) {
             } else if (k == KEY_CHAR && g_lastKeyChar == 'd') {
                 if (total) {
                     std::string nm = st.profiles[st.profileSel].name;
+                    KeyringDelete(nm);
                     st.profiles.erase(st.profiles.begin() + st.profileSel);
                     SaveProfiles(st.profiles);
                     if (st.profileSel >= (int)st.profiles.size() && st.profileSel > 0) st.profileSel--;
