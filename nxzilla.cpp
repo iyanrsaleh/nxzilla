@@ -20,6 +20,7 @@
 #include <cstdlib>
 #include <cctype>
 #include <ctime>
+#include <chrono>
 #include <string>
 #include <vector>
 #include <utility>
@@ -856,7 +857,7 @@ static bool SaveProfiles(const std::vector<Profile>& profiles) {
 // ===========================================================================
 // Subprocess
 // ===========================================================================
-// Pemindaian folder untuk menemukan proyek Nxzilla (folder ber-.nxzilla.json).
+// Pemindaian folder untuk menemukan proyek (folder ber-.nxzilla.json).
 static void ScanForProjects(const std::string& dir, int depth,
                             std::vector<Project>& out) {
     if (depth > 6) return;
@@ -1582,6 +1583,34 @@ static void SaveSyncedBaseline(const Profile& pr, const std::string& remotePath,
 // ===========================================================================
 // Utilitas tampilan
 // ===========================================================================
+// Format ukuran byte -> "1.2 KB", "3.4 MB".
+static std::string HumanBytes(long long b) {
+    if (b < 1024) return std::to_string(b) + " B";
+    double v = (double)b;
+    const char* u[] = {"KB", "MB", "GB", "TB"};
+    int i = -1;
+    while (v >= 1024 && i < 3) { v /= 1024; i++; }
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%.1f %s", v, u[i < 0 ? 0 : i]);
+    return buf;
+}
+
+// Ringkasan transfer: "3 file(s), 12.4 KB in 1.2s (10.3 KB/s)".
+static std::string TransferSummary(const std::string& verb, int files, long long bytes,
+                                   double seconds) {
+    char buf[128];
+    snprintf(buf, sizeof(buf), "%s %d file(s), %s", verb.c_str(), files,
+             HumanBytes(bytes).c_str());
+    std::string s = buf;
+    if (seconds > 0.0) {
+        snprintf(buf, sizeof(buf), " in %.1fs (", seconds);
+        s += buf;
+        double bps = (double)bytes / seconds;
+        s += HumanBytes((long long)bps) + "/s)";
+    }
+    return s;
+}
+
 static std::string PadClip(const std::string& s, size_t width) {
     if (s.size() >= width) return s.substr(0, width);
     return s + std::string(width - s.size(), ' ');
@@ -1971,6 +2000,8 @@ static std::string TuiSync(AppState& st, const Project& proj, bool isPush) {
     if (!BuildPlan(use, effectivePath, proj.localPath, ignore, plan, err))
         return "\x1b[1;31m[!]\x1b[0m Cannot scan remote: " + err;
 
+    auto tStart = std::chrono::steady_clock::now();
+    long long bytes = 0;
     int done = 0, skipped = 0, conflicts = 0;
     // Hitung total berkas yang akan ditransfer.
     int totalWork = 0;
@@ -2008,6 +2039,7 @@ static std::string TuiSync(AppState& st, const Project& proj, bool isPush) {
                 // Selaraskan mtime lokal dgn remote (yang baru di-set ke now).
                 long long rs = 0, rm = 0;
                 if (RemoteHeadMeta(use, it.rel, rs, rm) && rm > 0) SetFileMTime(localFile, rm);
+                if (it.localSize > 0) bytes += it.localSize;
                 done++;
             }
         } else {
@@ -2016,6 +2048,7 @@ static std::string TuiSync(AppState& st, const Project& proj, bool isPush) {
             if (RemoteGet(use, it.rel, localFile, e2)) {
                 long long rs = 0, rm = 0;
                 if (RemoteHeadMeta(use, it.rel, rs, rm) && rm > 0) SetFileMTime(localFile, rm);
+                if (rm > 0) bytes += rm;
                 done++;
             }
         }
@@ -2031,7 +2064,10 @@ static std::string TuiSync(AppState& st, const Project& proj, bool isPush) {
     SaveSyncedBaseline(use, effectivePath, proj.localPath);
 
     std::string doneverb = isPush ? "Pushed" : "Pulled";
-    std::string msg = "\x1b[1;32m[OK]\x1b[0m " + doneverb + " " + std::to_string(done) + " file(s)";
+    double elapsed = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - tStart).count();
+    std::string msg = std::string("\x1b[1;32m[OK]\x1b[0m ") +
+                      TransferSummary(doneverb, done, bytes, elapsed);
     if (skipped) msg += ", " + std::to_string(skipped) + " skipped";
     if (conflicts) msg += "\x1b[1;31m, " + std::to_string(conflicts) + " CONFLICT (use CLI --force)";
     return msg + ".";
@@ -2462,8 +2498,10 @@ int main(int argc, char** argv) {
                 Out("nxzilla: cannot scan remote: " + err + "\n");
                 return 1;
             }
+            auto tStart = std::chrono::steady_clock::now();
             if (a == "push") {
                 int done = 0, conflicts = 0;
+                long long bytes = 0;
                 if (dryRun) {
                     Out("[dry-run] " + std::to_string(plan.size()) + " change(s) vs " +
                         pr->protocol + "://" + pr->host + ":" + std::to_string(pr->port) +
@@ -2503,6 +2541,7 @@ int main(int argc, char** argv) {
                     }
                     long long rs = 0, rm = 0;
                     if (RemoteHeadMeta(use, it.rel, rs, rm) && rm > 0) SetFileMTime(localFile, rm);
+                    if (it.localSize > 0) bytes += it.localSize;
                     Out(std::string("  \x1b[1;32m^\x1b[0m ") + it.rel + "\n");
                     done++;
                 }
@@ -2514,12 +2553,15 @@ int main(int argc, char** argv) {
                 }
                 SaveProjects(ps);
                 SaveSyncedBaseline(use, effectivePath, proj->localPath);
-                Out("Pushed " + std::to_string(done) + " file(s).\n");
+                double elapsed = std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - tStart).count();
+                Out(TransferSummary("Pushed", done, bytes, elapsed) + ".\n");
                 if (conflicts) Out(std::to_string(conflicts) + " conflict(s) skipped (use --force).\n");
                 return 0;
             }
             // pull
             int done = 0, conflicts = 0;
+            long long bytes = 0;
             if (dryRun) {
                 Out("[dry-run] " + std::to_string(plan.size()) + " change(s) from " +
                     pr->protocol + "://" + pr->host + ":" + std::to_string(pr->port) +
@@ -2555,6 +2597,7 @@ int main(int argc, char** argv) {
                 // Samakan mtime lokal dengan remote agar banding berikutnya akurat.
                 long long rs = 0, rm = 0;
                 if (RemoteHeadMeta(use, it.rel, rs, rm) && rm > 0) SetFileMTime(localFile, rm);
+                if (rm > 0) bytes += rm;
                 Out(std::string("  \x1b[1;32mv\x1b[0m ") + it.rel + "\n");
                 done++;
             }
@@ -2566,7 +2609,9 @@ int main(int argc, char** argv) {
             }
             SaveProjects(ps);
             SaveSyncedBaseline(use, effectivePath, proj->localPath);
-            Out("Pulled " + std::to_string(done) + " file(s).\n");
+            double elapsed2 = std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - tStart).count();
+            Out(TransferSummary("Pulled", done, bytes, elapsed2) + ".\n");
             if (conflicts) Out(std::to_string(conflicts) + " conflict(s) skipped (use --force).\n");
             return 0;
         }
