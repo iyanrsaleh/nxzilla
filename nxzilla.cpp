@@ -1597,7 +1597,7 @@ static std::string OkBadge(const std::string& status) {
 // ===========================================================================
 // TUI screens
 // ===========================================================================
-enum Screen { SC_GLOBAL, SC_PROJECT, SC_PROFILES, SC_FORM };
+enum Screen { SC_GLOBAL, SC_PROJECT, SC_PROFILES, SC_FORM, SC_ONBOARD };
 enum FormKind { FORM_ADD_PROJECT, FORM_EDIT_PROJECT, FORM_ADD_PROFILE, FORM_EDIT_PROFILE };
 
 struct Form {
@@ -1618,6 +1618,7 @@ struct AppState {
     std::vector<Project> projects;
     std::vector<Profile> profiles;
     std::string projectRoot;  // when SC_PROJECT
+    std::string onboardDir;   // when SC_ONBOARD
     Form form;
 };
 
@@ -1808,6 +1809,24 @@ static void RenderGlobal(const AppState& st, int termRows, int termCols, std::st
     f += StatusLine(st.statusMsg);
 }
 
+// ---- Onboarding screen ----
+static void RenderOnboard(const AppState& st, std::string& f) {
+    char tb[64];
+    TimeNow(tb, sizeof(tb));
+    f += Header("Setup", tb);
+    f += "\x1b[K\r\n";
+    f += "\x1b[K\r\n";
+    f += "  This folder is not a Nxzilla project yet:\x1b[K\r\n";
+    f += "    \x1b[1m" + st.onboardDir + kReset + "\x1b[K\r\n";
+    f += "\x1b[K\r\n";
+    f += "  Register it and pull the remote project into this folder?\x1b[K\r\n";
+    f += "\x1b[K\r\n";
+    f += std::string(kGray) +
+         "  [Enter/Y] yes, set up now   [n] no, open global space   [q] quit\x1b[0m\x1b[K\r\n";
+    f += "\x1b[K\r\n";
+    f += StatusLine(st.statusMsg);
+}
+
 // ---- Project screen ----
 static void RenderProject(const AppState& st, std::string& f) {
     char tb[64];
@@ -1931,6 +1950,7 @@ static void TuiRepaint(const AppState& st) {
     if (st.screen == SC_GLOBAL) RenderGlobal(st, rows, cols, f);
     else if (st.screen == SC_PROJECT) RenderProject(st, f);
     else if (st.screen == SC_PROFILES) RenderProfiles(st, f);
+    else if (st.screen == SC_ONBOARD) RenderOnboard(st, f);
     else RenderForm(st, f);
     f += "\x1b[?2026l";
     Out(f);
@@ -2073,6 +2093,7 @@ static int RunTui(AppState& st, bool resetStatus = true) {
             if (st.screen == SC_GLOBAL) RenderGlobal(st, rows, cols, f);
             else if (st.screen == SC_PROJECT) RenderProject(st, f);
             else if (st.screen == SC_PROFILES) RenderProfiles(st, f);
+            else if (st.screen == SC_ONBOARD) RenderOnboard(st, f);
             else RenderForm(st, f);
 
             f += "\x1b[?2026l";  // end synchronized update
@@ -2099,6 +2120,26 @@ static int RunTui(AppState& st, bool resetStatus = true) {
             g_rawInput = (st.screen == SC_FORM);
             k = ReadKey(120);
             if (k == KEY_NONE) continue;
+        }
+
+        // ---- Onboarding ----
+        if (st.screen == SC_ONBOARD) {
+            bool yes = (k == KEY_ENTER) ||
+                       (k == KEY_CHAR && (g_lastKeyChar == 'y' || g_lastKeyChar == 'Y'));
+            bool no = (k == KEY_CHAR && (g_lastKeyChar == 'n' || g_lastKeyChar == 'N'));
+            if (yes) {
+                // Buka form Add-project, prefilled folder kini, kembali ke global.
+                StartForm(st, FORM_ADD_PROJECT, -1);
+                st.form.values[1] = st.onboardDir;
+                st.form.returnScreen = SC_GLOBAL;
+                st.statusMsg = "Editing " + st.form.labels[0];
+                dirty = true;
+            } else if (no || k == KEY_ESC) {
+                st.screen = SC_GLOBAL;
+                st.statusMsg = "Ready. Select a project or press [a].";
+                dirty = true;
+            }
+            continue;
         }
 
         // ---- Form input ----
@@ -2631,14 +2672,26 @@ int main(int argc, char** argv) {
 
     AppState st;
     bool inProject = FindProjectRoot(cwd, root);
-    if (!args.empty() && (args[0] == "projects" || args[0] == "list")) {
-        inProject = false;
-    }
+    bool forceGlobal = (!args.empty() && (args[0] == "projects" || args[0] == "list"));
     if (inProject) {
         st.screen = SC_PROJECT;
         st.projectRoot = root;
+    } else if (!forceGlobal) {
+        // Onboarding: folder bukan proyek & belum terdaftar -> tawarkan setup.
+        bool registered = false;
+        for (const auto& p : LoadProjects()) if (p.localPath == cwd) { registered = true; break; }
+        bool haveProfiles = !LoadProfiles().empty();
+        if (!registered && haveProfiles) {
+            st.screen = SC_ONBOARD;
+            st.onboardDir = cwd;
+            st.projects = LoadProjects();
+            st.profiles = LoadProfiles();
+            st.statusMsg = "Press [Enter] to set up this folder.";
+        } else {
+            st.screen = SC_GLOBAL;
+        }
     } else {
         st.screen = SC_GLOBAL;
     }
-    return RunTui(st);
+    return RunTui(st, st.screen != SC_ONBOARD);
 }

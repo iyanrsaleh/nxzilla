@@ -87,6 +87,9 @@ Fitur yang sudah jalan (v1.0.0):
   per berkas**, editor profil & proyek.
 - **Registry proyek global** + profil koneksi (`projects.json`,
   `connections.json`); perintah `add`, `scan`, `use`, `ignore`, `remove`.
+- **Onboarding**: menjalankan `nxzilla` di folder non-proyek (yang belum
+  terdaftar) langsung menawarkan *"Register it and pull the remote project into
+  this folder?"* → form setup terbuka dengan folder sudah terisi.
 - **Kredensial** tidak disimpan polos (obfuskasi); `NXZILLA_PASSWORD` untuk
   non-interaktif.
 - Fallback teks non-interaktif, `--version`, `--help`. Semua teks UI Inggris.

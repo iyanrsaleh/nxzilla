@@ -500,8 +500,8 @@ Ketentuan lintas platform:
 > `--force`, `--dry-run`, `--checksum`), Fase 5 (registry, `add`/`scan`/`use`/
 > `ignore`/`remove`, ruang global), Fase 6 (TUI dua konteks + progress transfer),
 > dan Fase 7 sebagian (obfuskasi kredensial + `NXZILLA_PASSWORD`).
-> **Belum:** OS keyring, `watch`/`edit`, statistik kecepatan, onboarding folder,
-> uji transfer SSH nyata.
+> **Belum:** OS keyring, `watch`/`edit`, statistik kecepatan, uji transfer SSH
+> nyata. (Onboarding folder otomatis sudah dikerjakan.)
 
 ### Fase 0 — Bootstrap
 - Kerangka repo, `build.bat`, `build.sh`, `.gitignore`, `LICENSE`.
