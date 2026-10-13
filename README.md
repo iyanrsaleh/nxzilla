@@ -6,6 +6,10 @@ Buka terminal di folder proyek, jalankan `nxzilla`, dan berkas proyek remote
 masuk ke folder kerja (cd) tersebut. Perubahan dikirim balik ke server lewat
 perintah. Satu alur, dari terminal.
 
+**Versi terbaru: v1.0.0** — unduh biner siap pakai di
+[halaman Releases](https://github.com/iyanrsaleh/nxzilla/releases):
+`nxzilla-windows-x64.exe` (Windows) dan `nxzilla-linux-x64` (Linux).
+
 ```
         Terminal user (folder kerja saat ini, mis. D:\Website)
                         |
@@ -66,32 +70,35 @@ yang memakai Nxzilla**, dan membuka salah satunya dari situ.
 
 ## Status saat ini
 
-Yang sudah jalan:
+Fitur yang sudah jalan (v1.0.0):
 
-- Build hijau di Windows (`build.bat`, MSVC). `build.sh` (g++) disiapkan untuk
-  Linux.
-- TUI keyboard-driven bergaya NxPort: header orange, synchronized output,
-  raw terminal, tanpa kedip.
-- Registry proyek global + profil koneksi: baca/tulis `projects.json` dan
-  `connections.json` (parser JSON minim, tanpa dependensi).
-- Deteksi konteks otomatis: di dalam proyek → mode proyek; di luar → ruang
-  global.
-- Menu **Settings** untuk mengelola profil koneksi (tambah/edit/hapus:
-  name, protocol, host, port, user, password, remote path).
-- Tambah/edit/hapus proyek dari ruang global.
-- Fallback teks non-interaktif (saat output di-pipe), `--version`, `--help`,
-  dan perintah `remove <nama>`.
-- Semua teks UI **berbahasa Inggris**.
+- **Build hijau di Windows (MSVC) dan Linux (g++)** — satu basis kode.
+- **Backend koneksi**: FTP/FTPS (via `curl`) dan SSH/SFTP (via OpenSSH
+  `ssh`/`sftp`).
+- **Sinkron cerdas**: banding lokal vs remote pakai **ukuran + mtime**;
+  klasifikasi `A` (hanya lokal), `D` (hanya remote), `M` (berubah); hormati
+  `ignore`.
+- **`pull` / `push` / `status`** hanya mentransfer berkas yang berubah.
+- **Deteksi konflik**: berkas yang berubah di dua sisi ditandai `CONFLICT` dan
+  dilewati; timpa dengan `--force`.
+- **`--checksum`**: banding pakai SHA-1 (akurat walau ukuran & mtime sama).
+- **`--dry-run`**: tampilkan rencana transfer tanpa mengubah apa pun.
+- **TUI** keyboard-driven bergaya NxPort: tombol push/pull/status, **progress
+  per berkas**, editor profil & proyek.
+- **Registry proyek global** + profil koneksi (`projects.json`,
+  `connections.json`); perintah `add`, `scan`, `use`, `ignore`, `remove`.
+- **Kredensial** tidak disimpan polos (obfuskasi); `NXZILLA_PASSWORD` untuk
+  non-interaktif.
+- Fallback teks non-interaktif, `--version`, `--help`. Semua teks UI Inggris.
 
-Belum jalan (lihat `RENCANA.md`): koneksi nyata SSH/SFTP dan FTP/FTPS,
-mesin sinkron `pull`/`push`, progress transfer.
+Belum ada (rencana): OS keyring (kredensial), `watch`/`edit <file>`, statistik
+kecepatan, onboarding folder otomatis. Lihat `RENCANA.md`.
 
 ## Perintah
 
 ```sh
 nxzilla                      # dalam proyek: sinkron proyek; di luar: ruang global
 nxzilla projects             # paksa buka ruang global (daftar proyek)
-nxzilla open <nama|path>     # buka/sinkron proyek terdaftar dari mana saja
 nxzilla add                  # daftarkan folder kini sebagai proyek (+ profil)
 nxzilla remove <nama>        # hapus dari registry (folder tidak dihapus)
 nxzilla scan [folder]        # cari folder ber-.nxzilla.json lalu daftarkan
@@ -101,7 +108,9 @@ nxzilla status               # tampilkan status sinkronisasi (tanpa mengubah)
 nxzilla ls [path]            # daftar isi folder remote (tanpa menarik berkas)
 nxzilla use <nama-profil>    # set profil untuk folder kerja saat ini
 nxzilla ignore <pola>        # tambah pola ignore ke .nxzilla.json
-nxzilla --dry-run push       # simulasi push, tampilkan berkas yang akan dikirim
+nxzilla push --dry-run       # simulasi, tampilkan berkas yang akan ditransfer
+nxzilla push --force         # timpa berkas konflik
+nxzilla push --checksum      # banding pakai SHA-1
 nxzilla --help               # bantuan
 nxzilla --version            # versi
 ```
@@ -182,6 +191,9 @@ Registry proyek global:
 
 ## Build
 
+Punya biner siap pakai? Lihat [Releases](https://github.com/iyanrsaleh/nxzilla/releases).
+Dari sumber:
+
 Windows (MSVC via vswhere):
 
 ```powershell
@@ -196,6 +208,9 @@ Linux (g++):
 
 Hasil: `nxzilla.exe` (Windows) atau `nxzilla` (Linux). Tambahkan folder ini ke
 `PATH` agar bisa dipanggil dari mana saja.
+
+FTP/FTPS memerlukan `curl` di PATH; SSH/SFTP memerlukan klien OpenSSH (`ssh`,
+`sftp`) — keduanya tersedia bawaan di Windows 10/11 dan mayoritas distro Linux.
 
 ## Struktur repo
 

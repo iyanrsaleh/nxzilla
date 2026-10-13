@@ -493,6 +493,16 @@ Ketentuan lintas platform:
 
 ## 7. Roadmap per Fase
 
+> **Status v1.0.0 (rilis).** Berikut yang sudah selesai dan teruji:
+> Fase 0 (build Windows **dan** Linux hijau), Fase 1 (profil & konfigurasi),
+> Fase 2 (SSH/SFTP — routing terverifikasi; transfer penuh menunggu server uji),
+> Fase 3 (FTP/FTPS — teruji penuh), Fase 4 (mesin sinkron, ignore, konflik +
+> `--force`, `--dry-run`, `--checksum`), Fase 5 (registry, `add`/`scan`/`use`/
+> `ignore`/`remove`, ruang global), Fase 6 (TUI dua konteks + progress transfer),
+> dan Fase 7 sebagian (obfuskasi kredensial + `NXZILLA_PASSWORD`).
+> **Belum:** OS keyring, `watch`/`edit`, statistik kecepatan, onboarding folder,
+> uji transfer SSH nyata.
+
 ### Fase 0 — Bootstrap
 - Kerangka repo, `build.bat`, `build.sh`, `.gitignore`, `LICENSE`.
 - `connections.example.json`, `.nxzilla.json.example`, `projects.example.json`.
@@ -607,11 +617,20 @@ nol (bungkus `rsync`/`lftp`/`sftp`).
 
 ## 11. Langkah Berikutnya
 
-1. Konfirmasi keputusan di bagian 10 (terutama nomor 1, 2, 5, dan 6).
-2. Fase 0 — kerangka repo + dua skrip build.
-3. Fase 1 — profil & konfigurasi (dasar semua perintah).
-4. Fase 2 — koneksi SSH/SFTP: ini jantung proyek.
-5. Fase 5 — registry proyek & ruang global (beranda daftar proyek).
-6. Uji alur nyata: `PS D:\Website> nxzilla` menarik proyek, lalu `nxzilla push`
-   mengirim perubahan balik; dan `nxzilla` di luar proyek menampilkan daftar
-   proyek.
+**v1.0.0 sudah rilis** (Windows + Linux). Alur inti sudah hidup dan teruji:
+`nxzilla add`/`scan` → `pull` (tarik proyek ke cd) → edit lokal → `push`
+(kirim balik), dengan diff A/D/M, `ignore`, konflik + `--force`, `--dry-run`,
+dan `--checksum`; plus TUI dengan progress.
+
+Sisa untuk v1.1+:
+
+1. **OS keyring** untuk kredensial (Windows Credential Manager / `libsecret`) —
+   menggantikan obfuskasi.
+2. **Uji transfer SSH nyata** (aktifkan `openssh-server` di WSL) untuk menutup
+   Fase 2 sepenuhnya.
+3. **`nxzilla watch`** (pantau perubahan remote) dan **`nxzilla edit <file>`**
+   (tarik → edit di `$EDITOR` → unggah).
+4. **Statistik transfer** (jumlah byte, kecepatan, durasi).
+5. **Onboarding folder otomatis**: tawarkan membuat `.nxzilla.json` saat
+   `nxzilla` dijalankan di folder non-proyek.
+6. **Klarifikasi "nxzilla plus"** (bagian 10 nomor 6).
