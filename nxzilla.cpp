@@ -2210,7 +2210,8 @@ static std::string TuiSync(AppState& st, const Project& proj, bool isPush) {
             if (RemoteGet(use, it.rel, localFile, e2)) {
                 long long rs = 0, rm = 0;
                 if (RemoteHeadMeta(use, it.rel, rs, rm) && rm > 0) SetFileMTime(localFile, rm);
-                if (rm > 0) bytes += rm;
+                long long sz = FileSize(localFile);
+                if (sz > 0) bytes += sz;
                 done++;
             }
         }
@@ -2808,7 +2809,8 @@ int main(int argc, char** argv) {
                     }
                     long long rs = 0, rm = 0;
                     if (RemoteHeadMeta(use, b.first, rs, rm) && rm > 0) SetFileMTime(b.second, rm);
-                    if (rm > 0) bytes += rm;
+                    long long sz = FileSize(b.second);
+                    if (sz > 0) bytes += sz;
                     Out(std::string("  \x1b[1;32mv\x1b[0m ") + b.first + "\n");
                     done++;
                 }
