@@ -1,0 +1,23 @@
+{
+  "profiles": [
+    {
+      "name": "nxdom-ssh",
+      "protocol": "ssh",
+      "host": "nxdom.org",
+      "port": 22,
+      "user": "info",
+      "password": "",
+      "key": "~/.ssh/id_ed25519",
+      "remotePath": "/var/www/nxdom"
+    },
+    {
+      "name": "hosting-ftp",
+      "protocol": "ftp",
+      "host": "ftp.example.com",
+      "port": 21,
+      "user": "deploy",
+      "password": "",
+      "remotePath": "/public_html"
+    }
+  ]
+}

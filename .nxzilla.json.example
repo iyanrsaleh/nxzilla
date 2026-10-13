@@ -1,0 +1,6 @@
+{
+  "profile": "nxdom-ssh",
+  "remotePath": "/var/www/nxdom",
+  "lastSync": "",
+  "ignore": [".git/", "node_modules/", "vendor/", "*.log", ".env"]
+}

@@ -1,0 +1,12 @@
+{
+  "projects": [
+    {
+      "name": "Website nxdom",
+      "localPath": "D:\\Website",
+      "profile": "nxdom-ssh",
+      "remotePath": "/var/www/nxdom",
+      "lastSync": "",
+      "lastStatus": "unknown"
+    }
+  ]
+}
