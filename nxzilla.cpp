@@ -970,6 +970,11 @@ static std::string CfgQuote(const std::string& s) {
     return r;
 }
 
+// Jalankan perintah dengan terminal diwarisi (untuk editor). Blok sampai selesai.
+static int RunInteractive(const std::string& cmd) {
+    return system(cmd.c_str());
+}
+
 // Batch unduh: items = pasangan (remoteRel, localFile). Satu sesi curl.
 static bool FtpBatchGet(const Profile& pr, const std::vector<std::pair<std::string, std::string>>& items,
                         std::string& err) {
@@ -2509,6 +2514,7 @@ static void PrintHelp() {
         "  nxzilla status             sync status (read-only)\n"
         "  nxzilla ls [path]          list a remote folder\n"
         "  nxzilla use <profile>      set the profile for this working folder\n"
+        "  nxzilla edit <file>        pull a file, edit it, upload it back\n"
         "  nxzilla ignore <pattern>   add an ignore pattern\n"
         "  nxzilla --help             help\n"
         "  nxzilla --version          version\n"
@@ -2849,6 +2855,73 @@ int main(int argc, char** argv) {
             }
             Out(exists ? "nxzilla: pattern already present: " : "nxzilla: ignore added: ");
             Out(pat + "\n");
+            return 0;
+        }
+        if (a == "edit" && args.size() >= 2 && args[1][0] != '-') {
+            std::string cwd0 = CurrentDir();
+            std::vector<Project> ps = LoadProjects();
+            std::vector<Profile> prs = LoadProfiles();
+            const Project* proj = nullptr;
+            for (const auto& p : ps) if (p.localPath == cwd0) { proj = &p; break; }
+            if (!proj) {
+                Out("nxzilla: this folder is not a registered project.\n");
+                return 1;
+            }
+            const Profile* pr = nullptr;
+            for (const auto& q : prs) if (q.name == proj->profile) { pr = &q; break; }
+            if (!pr) { Out("nxzilla: profile not found.\n"); return 1; }
+            std::string effPath = proj->remotePath.empty() ? pr->remotePath : proj->remotePath;
+            Profile use = *pr;
+            use.remotePath = effPath;
+
+            // rel = argumen, dengan pemisah '/'
+            std::string rel = args[1];
+            for (char& c : rel) if (c == '\\') c = '/';
+            while (!rel.empty() && rel[0] == '/') rel.erase(0, 1);
+
+            std::string localFile = proj->localPath;
+            if (localFile.back() != '/' && localFile.back() != '\\') localFile += kPathSep;
+            std::string relOs = rel;
+            for (char& c : relOs) if (c == '/') c = kPathSep;
+            localFile += relOs;
+            size_t slash = localFile.find_last_of("/\\");
+            if (slash != std::string::npos) EnsureDir(localFile.substr(0, slash));
+
+            // Tarik versi terbaru dari server (abaikan bila gagal: berkas baru).
+            std::string gerr;
+            if (RemoteGet(use, rel, localFile, gerr)) {
+                long long rs = 0, rm = 0;
+                if (RemoteHeadMeta(use, rel, rs, rm) && rm > 0) SetFileMTime(localFile, rm);
+                Out("nxzilla: pulled " + rel + "\n");
+            } else {
+                Out("nxzilla: '" + rel + "' not on server yet (new file).\n");
+            }
+
+            // Pilih editor.
+            const char* envEd = getenv("EDITOR");
+#ifdef _WIN32
+            if (!envEd || !*envEd) envEd = getenv("EDITOR");
+            std::string editor = (envEd && *envEd) ? envEd : "notepad";
+#else
+            std::string editor = (envEd && *envEd) ? envEd : "vi";
+#endif
+            // Editor dari env bisa berisi beberapa kata (mis. "code -w").
+            std::string cmd = editor + " " + ShellQuoteD(localFile);
+            Out("nxzilla: opening in '" + editor + "' ...\n");
+            int rc = RunInteractive(cmd);
+            if (rc != 0) {
+                Out("nxzilla: editor exited with code " + std::to_string(rc) + ".\n");
+            }
+
+            // Unggah balik.
+            std::string perr;
+            if (!RemotePut(use, rel, localFile, perr)) {
+                Out("nxzilla: upload failed: " + perr + "\n");
+                return 1;
+            }
+            long long rs = 0, rm = 0;
+            if (RemoteHeadMeta(use, rel, rs, rm) && rm > 0) SetFileMTime(localFile, rm);
+            Out("nxzilla: uploaded " + rel + "\n");
             return 0;
         }
         if (a == "scan") {
