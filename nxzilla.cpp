@@ -793,6 +793,24 @@ static bool LoadProjectConfig(const std::string& projectDir, std::string& profil
     return true;
 }
 
+// Tulis .nxzilla.json.
+static bool SaveProjectConfig(const std::string& projectDir, const std::string& profile,
+                              const std::string& remotePath,
+                              const std::vector<std::string>& ignore) {
+    std::string j = "{\n";
+    j += "  \"profile\": \"" + EscapeJson(profile) + "\",\n";
+    j += "  \"remotePath\": \"" + EscapeJson(remotePath) + "\",\n";
+    j += "  \"ignore\": [";
+    for (size_t i = 0; i < ignore.size(); ++i) {
+        j += "\"" + EscapeJson(ignore[i]) + "\"";
+        if (i + 1 < ignore.size()) j += ", ";
+    }
+    j += "]\n}\n";
+    std::string path;
+    if (!JoinPath(projectDir, ".nxzilla.json", path)) return false;
+    return WriteFileText(path, j);
+}
+
 static bool SaveProjects(const std::vector<Project>& projects) {
     std::string j = "{\n  \"projects\": [\n";
     for (size_t i = 0; i < projects.size(); ++i) {
@@ -2509,6 +2527,49 @@ int main(int argc, char** argv) {
             SaveSyncedBaseline(use, effectivePath, proj->localPath);
             Out("Pulled " + std::to_string(done) + " file(s).\n");
             if (conflicts) Out(std::to_string(conflicts) + " conflict(s) skipped (use --force).\n");
+            return 0;
+        }
+        if (a == "use" && args.size() >= 2) {
+            std::string cwd0 = CurrentDir();
+            std::vector<Profile> prs = LoadProfiles();
+            bool found = false;
+            for (const auto& p : prs) if (p.name == args[1]) { found = true; break; }
+            if (!found) { Out("nxzilla: profile '" + args[1] + "' not found.\n"); return 1; }
+            std::string prof, rp;
+            LoadProjectConfig(cwd0, prof, rp);
+            std::vector<std::string> ig = LoadProjectIgnore(cwd0);
+            if (!SaveProjectConfig(cwd0, args[1], rp, ig)) {
+                Out("nxzilla: can't write .nxzilla.json here.\n");
+                return 1;
+            }
+            // Perbarui registry bila folder ini terdaftar.
+            std::vector<Project> reg = LoadProjects();
+            bool touched = false;
+            for (auto& p : reg) if (p.localPath == cwd0) { p.profile = args[1]; touched = true; }
+            if (touched) SaveProjects(reg);
+            Out("nxzilla: profile set to '" + args[1] + "' for " + cwd0 + ".\n");
+            return 0;
+        }
+        if (a == "ignore") {
+            std::string cwd0 = CurrentDir();
+            std::vector<std::string> ig = LoadProjectIgnore(cwd0);
+            if (args.size() < 2 || args[1][0] == '-') {
+                if (ig.empty()) Out("nxzilla: no ignore patterns.\n");
+                else { Out("Ignore patterns:\n"); for (const auto& p : ig) Out("  " + p + "\n"); }
+                return 0;
+            }
+            const std::string& pat = args[1];
+            bool exists = false;
+            for (const auto& p : ig) if (p == pat) { exists = true; break; }
+            if (!exists) ig.push_back(pat);
+            std::string prof, rp;
+            LoadProjectConfig(cwd0, prof, rp);
+            if (!SaveProjectConfig(cwd0, prof, rp, ig)) {
+                Out("nxzilla: can't write .nxzilla.json here.\n");
+                return 1;
+            }
+            Out(exists ? "nxzilla: pattern already present: " : "nxzilla: ignore added: ");
+            Out(pat + "\n");
             return 0;
         }
         if (a == "scan") {
