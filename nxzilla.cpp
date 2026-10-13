@@ -943,6 +943,73 @@ static int CurlRun(const Profile& pr, const std::string& extra, std::string& out
     return RunCapture(cmd, out);
 }
 
+// Jalankan curl dengan file konfigurasi (-K) -> banyak transfer dalam SATU
+// koneksi (jauh lebih cepat daripada satu proses curl per berkas).
+static int CurlRunConfig(const Profile& pr, const std::string& cfgText, std::string& out) {
+    EnsureDir(ConfigDir());
+    std::string cfg;
+    JoinPath(ConfigDir(), "curl_batch.cfg", cfg);
+    WriteFileText(cfg, cfgText);
+    std::string cmd = "curl -sS";
+    if (pr.protocol == "ftps") cmd += " --ssl-reqd";
+    if (!pr.user.empty())
+        cmd += " --user " + ShellQuoteD(pr.user + ":" + EffectivePassword(pr));
+    cmd += " --connect-timeout 15 --max-time 900";
+    cmd += " -K " + ShellQuoteD(cfg) + " 2>&1";
+    return RunCapture(cmd, out);
+}
+
+// Escape nilai untuk file config curl (kutip ganda).
+static std::string CfgQuote(const std::string& s) {
+    std::string r = "\"";
+    for (char c : s) {
+        if (c == '"' || c == '\\') r += '\\';
+        r += c;
+    }
+    r += "\"";
+    return r;
+}
+
+// Batch unduh: items = pasangan (remoteRel, localFile). Satu sesi curl.
+static bool FtpBatchGet(const Profile& pr, const std::vector<std::pair<std::string, std::string>>& items,
+                        std::string& err) {
+    if (items.empty()) return true;
+    std::string urlBase = (pr.protocol == "ftps" ? "ftps://" : "ftp://") + pr.host;
+    if (pr.port > 0) urlBase += ":" + std::to_string(pr.port);
+    std::string rp = pr.remotePath;
+    if (rp.empty() || rp[0] != '/') rp = "/" + rp;
+    if (rp.back() != '/') rp += "/";
+    std::string cfg;
+    for (const auto& it : items) {
+        cfg += "url = " + CfgQuote(urlBase + rp + it.first) + "\n";
+        cfg += "output = " + CfgQuote(it.second) + "\n";
+    }
+    std::string out;
+    int rc = CurlRunConfig(pr, cfg, out);
+    if (rc != 0) { err = out; return false; }
+    return true;
+}
+
+// Batch unggah: items = pasangan (localFile, remoteRel). Satu sesi curl.
+static bool FtpBatchPut(const Profile& pr, const std::vector<std::pair<std::string, std::string>>& items,
+                        std::string& err) {
+    if (items.empty()) return true;
+    std::string urlBase = (pr.protocol == "ftps" ? "ftps://" : "ftp://") + pr.host;
+    if (pr.port > 0) urlBase += ":" + std::to_string(pr.port);
+    std::string rp = pr.remotePath;
+    if (rp.empty() || rp[0] != '/') rp = "/" + rp;
+    if (rp.back() != '/') rp += "/";
+    std::string cfg;
+    for (const auto& it : items) {
+        cfg += "upload-file = " + CfgQuote(it.first) + "\n";
+        cfg += "url = " + CfgQuote(urlBase + rp + it.second) + "\n";
+    }
+    std::string out;
+    int rc = CurlRunConfig(pr, cfg, out);
+    if (rc != 0) { err = out; return false; }
+    return true;
+}
+
 // Uji koneksi: daftar isi folder remote.
 static bool FtpList(const Profile& pr, const std::string& remotePath,
                     std::vector<std::string>& names, std::string& err) {
@@ -1259,6 +1326,61 @@ static long long ParseHttpDate(const std::string& s) {
 #endif
 }
 
+// Batch HEAD untuk FTP: ambil size+mtime banyak berkas dalam satu koneksi.
+// hasil: map rel -> {size, mtime}.
+static bool FtpHeadMany(const Profile& pr, const std::vector<std::string>& rels,
+                        std::vector<RemoteEntry>& out) {
+    if (rels.empty()) return true;
+    std::string urlBase = (pr.protocol == "ftps" ? "ftps://" : "ftp://") + pr.host;
+    if (pr.port > 0) urlBase += ":" + std::to_string(pr.port);
+    std::string rp = pr.remotePath;
+    if (rp.empty() || rp[0] != '/') rp = "/" + rp;
+    if (rp.back() != '/') rp += "/";
+
+    // Bangun perintah: -I url1 url2 ... -w "MARK url\n"
+    std::string cmd = "curl -sSI";
+    if (pr.protocol == "ftps") cmd += " --ssl-reqd";
+    if (!pr.user.empty())
+        cmd += " --user " + ShellQuoteD(pr.user + ":" + EffectivePassword(pr));
+    cmd += " --connect-timeout 15 --max-time 900";
+    for (const auto& r : rels) cmd += " " + ShellQuoteD(urlBase + rp + r);
+    cmd += " -w " + ShellQuoteD("MARK %{url_effective}\n") + " 2>&1";
+    std::string raw;
+    RunCapture(cmd, raw);
+
+    // Urutkan hasil berdasarkan kemunculan MARK agar bisa dipetakan ke rel.
+    size_t pos = 0;
+    for (const auto& r : rels) {
+        RemoteEntry e;
+        e.rel = r;
+        e.size = -1;
+        // cari blok sebelum "MARK <url yang berakhiran r>"
+        std::string want = "MARK " + urlBase + rp + r;
+        size_t mk = raw.find(want, pos);
+        if (mk == std::string::npos) { out.push_back(std::move(e)); continue; }
+        std::string block = raw.substr(pos, mk - pos);
+        pos = mk;
+        size_t cl = block.find("Content-Length:");
+        if (cl != std::string::npos) {
+            cl += 15;
+            while (cl < block.size() && (block[cl] == ' ' || block[cl] == '\t')) cl++;
+            long long v = 0; bool any = false;
+            while (cl < block.size() && isdigit((unsigned char)block[cl])) { v = v*10 + (block[cl]-'0'); cl++; any = true; }
+            if (any) e.size = v;
+        }
+        size_t lmIdx = block.find("Last-Modified:");
+        if (lmIdx != std::string::npos) {
+            lmIdx += 14;
+            while (lmIdx < block.size() && block[lmIdx] == ' ') lmIdx++;
+            size_t le = block.find('\n', lmIdx);
+            if (le == std::string::npos) le = block.size();
+            e.mtime = ParseHttpDate(block.substr(lmIdx, le - lmIdx));
+        }
+        out.push_back(std::move(e));
+    }
+    return true;
+}
+
 // HEAD ke satu berkas remote -> ukuran + mtime. size=-1 bila tidak ada.
 static bool FtpHeadMeta(const Profile& pr, const std::string& remoteRel,
                         long long& size, long long& mtime) {
@@ -1376,12 +1498,33 @@ static bool ScanRemote(const Profile& pr, const std::string& remotePath,
         } else {
             RemoteEntry e;
             e.rel = rel;
-            RemoteHeadMeta(pr, rel, e.size, e.mtime);
-            if (checksum) e.hash = RemoteSha1(pr, rel);
+            e.size = -1;  // diisi belakangan secara batch
             out.push_back(std::move(e));
         }
     }
     return true;
+}
+
+// Isi size/mtime (dan hash bila checksum) untuk semua entri hasil ScanRemote.
+// FTP: satu koneksi HEAD untuk semua berkas. SSH: per berkas via stat.
+static void FillRemoteMeta(const Profile& pr, std::vector<RemoteEntry>& out, bool checksum) {
+    if (IsSsh(pr)) {
+        for (auto& e : out) {
+            RemoteHeadMeta(pr, e.rel, e.size, e.mtime);
+            if (checksum) e.hash = RemoteSha1(pr, e.rel);
+        }
+        return;
+    }
+    std::vector<std::string> rels;
+    rels.reserve(out.size());
+    for (const auto& e : out) rels.push_back(e.rel);
+    std::vector<RemoteEntry> meta;
+    FtpHeadMany(pr, rels, meta);
+    for (size_t i = 0; i < out.size() && i < meta.size(); ++i) {
+        out[i].size = meta[i].size;
+        out[i].mtime = meta[i].mtime;
+        if (checksum) out[i].hash = RemoteSha1(pr, out[i].rel);
+    }
 }
 
 // Pola ignore minimal: cocokkan nama berkas/folder atau akhiran.
@@ -1562,6 +1705,7 @@ static bool BuildPlan(const Profile& pr, const std::string& remotePath,
     std::vector<RemoteEntry> local, remote;
     ScanLocal(localDir, "", ignore, 0, local, checksum);
     if (!ScanRemote(pr, remotePath, "", 0, remote, err, checksum)) return false;
+    FillRemoteMeta(pr, remote, checksum);
     Baseline base = LoadBaseline(localDir);
     plan = DiffTrees(local, remote, base, checksum);
     return true;
@@ -1574,6 +1718,7 @@ static void SaveSyncedBaseline(const Profile& pr, const std::string& remotePath,
     std::vector<RemoteEntry> remote;
     std::string err;
     if (ScanRemote(pr, remotePath, "", 0, remote, err)) {
+        FillRemoteMeta(pr, remote, false);
         std::sort(remote.begin(), remote.end(),
                   [](const RemoteEntry& a, const RemoteEntry& b) { return a.rel < b.rel; });
         SaveBaseline(localDir, remote);
@@ -2514,6 +2659,7 @@ int main(int argc, char** argv) {
                     Out("[dry-run] no changes made.\n");
                     return 0;
                 }
+                std::vector<std::pair<std::string, std::string>> batch;  // (localFile, rel)
                 for (const auto& it : plan) {
                     if (it.kind == 'D') continue;  // hanya remote, jangan kirim
                     if (it.conflict && !force) {
@@ -2523,27 +2669,49 @@ int main(int argc, char** argv) {
                     }
                     std::string localFile = proj->localPath;
                     if (localFile.back() != '/' && localFile.back() != '\\') localFile += kPathSep;
-                    // normalkan rel ke pemisah OS
                     std::string rel = it.rel;
                     for (char& c : rel) if (c == '/') c = kPathSep;
                     localFile += rel;
-                    // buat folder induk di remote bila perlu
                     size_t slash = it.rel.find_last_of('/');
                     if (slash != std::string::npos) {
                         std::string dirRel = it.rel.substr(0, slash);
                         std::string derr;
                         RemoteMkdir(use, dirRel, derr);
                     }
-                    std::string perr;
-                    if (!RemotePut(use, it.rel, localFile, perr)) {
-                        Out("  \x1b[1;31m!\x1b[0m " + it.rel + "  (" + perr + ")\n");
-                        continue;
+                    batch.push_back({localFile, it.rel});
+                }
+                if (!IsSsh(use) && !batch.empty()) {
+                    std::string berr;
+                    if (FtpBatchPut(use, batch, berr)) {
+                        // Ambil mtime semua berkas dalam satu HEAD batch.
+                        std::vector<std::string> rels;
+                        for (const auto& b : batch) rels.push_back(b.second);
+                        std::vector<RemoteEntry> metas;
+                        FtpHeadMany(use, rels, metas);
+                        for (size_t i = 0; i < batch.size(); ++i) {
+                            Out(std::string("  \x1b[1;32m^\x1b[0m ") + batch[i].second + "\n");
+                            if (i < metas.size() && metas[i].mtime > 0)
+                                SetFileMTime(batch[i].first, metas[i].mtime);
+                            bytes += FileSize(batch[i].first);
+                            done++;
+                        }
+                    } else {
+                        Out("nxzilla: batch push failed: " + berr + "\n");
+                        return 1;
                     }
-                    long long rs = 0, rm = 0;
-                    if (RemoteHeadMeta(use, it.rel, rs, rm) && rm > 0) SetFileMTime(localFile, rm);
-                    if (it.localSize > 0) bytes += it.localSize;
-                    Out(std::string("  \x1b[1;32m^\x1b[0m ") + it.rel + "\n");
-                    done++;
+                } else {
+                    for (const auto& b : batch) {
+                        std::string perr;
+                        if (!RemotePut(use, b.second, b.first, perr)) {
+                            Out("  \x1b[1;31m!\x1b[0m " + b.second + "  (" + perr + ")\n");
+                            continue;
+                        }
+                        long long rs = 0, rm = 0;
+                        if (RemoteHeadMeta(use, b.second, rs, rm) && rm > 0) SetFileMTime(b.first, rm);
+                        bytes += FileSize(b.first);
+                        Out(std::string("  \x1b[1;32m^\x1b[0m ") + b.second + "\n");
+                        done++;
+                    }
                 }
                 for (auto& p : ps) if (p.name == proj->name) {
                     p.lastStatus = done ? "synced" : p.lastStatus;
@@ -2574,6 +2742,9 @@ int main(int argc, char** argv) {
                 Out("[dry-run] no changes made.\n");
                 return 0;
             }
+            // Kumpulkan berkas yang akan ditransfer; pakai batch (satu koneksi)
+            // bila transportnya FTP.
+            std::vector<std::pair<std::string, std::string>> batch;  // (rel, localFile)
             for (const auto& it : plan) {
                 if (it.kind == 'A') continue;  // hanya lokal, jangan timpa
                 if (it.conflict && !force) {
@@ -2586,20 +2757,42 @@ int main(int argc, char** argv) {
                 std::string rel = it.rel;
                 for (char& c : rel) if (c == '/') c = kPathSep;
                 localFile += rel;
-                // pastikan folder induk ada
                 size_t slash = localFile.find_last_of("/\\");
                 if (slash != std::string::npos) EnsureDir(localFile.substr(0, slash));
-                std::string gerr;
-                if (!RemoteGet(use, it.rel, localFile, gerr)) {
-                    Out("  \x1b[1;31m!\x1b[0m " + it.rel + "  (" + gerr + ")\n");
-                    continue;
+                batch.push_back({it.rel, localFile});
+            }
+            if (!IsSsh(use) && !batch.empty()) {
+                std::string berr;
+                if (FtpBatchGet(use, batch, berr)) {
+                    std::vector<std::string> rels;
+                    for (const auto& b : batch) rels.push_back(b.first);
+                    std::vector<RemoteEntry> metas;
+                    FtpHeadMany(use, rels, metas);
+                    for (size_t i = 0; i < batch.size(); ++i) {
+                        Out(std::string("  \x1b[1;32mv\x1b[0m ") + batch[i].first + "\n");
+                        if (i < metas.size() && metas[i].mtime > 0)
+                            SetFileMTime(batch[i].second, metas[i].mtime);
+                        long long rm = (i < metas.size()) ? metas[i].mtime : 0;
+                        if (rm > 0) bytes += FileSize(batch[i].second);
+                        done++;
+                    }
+                } else {
+                    Out("nxzilla: batch pull failed: " + berr + "\n");
+                    return 1;
                 }
-                // Samakan mtime lokal dengan remote agar banding berikutnya akurat.
-                long long rs = 0, rm = 0;
-                if (RemoteHeadMeta(use, it.rel, rs, rm) && rm > 0) SetFileMTime(localFile, rm);
-                if (rm > 0) bytes += rm;
-                Out(std::string("  \x1b[1;32mv\x1b[0m ") + it.rel + "\n");
-                done++;
+            } else {
+                for (const auto& b : batch) {
+                    std::string gerr;
+                    if (!RemoteGet(use, b.first, b.second, gerr)) {
+                        Out("  \x1b[1;31m!\x1b[0m " + b.first + "  (" + gerr + ")\n");
+                        continue;
+                    }
+                    long long rs = 0, rm = 0;
+                    if (RemoteHeadMeta(use, b.first, rs, rm) && rm > 0) SetFileMTime(b.second, rm);
+                    if (rm > 0) bytes += rm;
+                    Out(std::string("  \x1b[1;32mv\x1b[0m ") + b.first + "\n");
+                    done++;
+                }
             }
             for (auto& p : ps) if (p.name == proj->name) {
                 p.lastStatus = done ? "synced" : p.lastStatus;

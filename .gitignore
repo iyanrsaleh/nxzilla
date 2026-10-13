@@ -14,3 +14,4 @@ Thumbs.db
 .sftp_batch.txt
 tui_script.log
 sync_debug.log
+curl_batch.cfg
