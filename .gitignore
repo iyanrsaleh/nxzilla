@@ -12,3 +12,5 @@ Thumbs.db
 .nxzilla.json
 .nxzilla-state.json
 .sftp_batch.txt
+tui_script.log
+sync_debug.log
