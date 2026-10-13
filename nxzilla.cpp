@@ -725,7 +725,7 @@ static std::string Deobfuscate(const std::string& stored) {
 // ===========================================================================
 // OS keyring (Windows Credential Manager). Di Linux: fallback obfuskasi.
 // ===========================================================================
-static std::string KeyringTarget(const std::string& profileName) {
+[[maybe_unused]] static std::string KeyringTarget(const std::string& profileName) {
     return "Nxzilla/" + profileName;
 }
 
