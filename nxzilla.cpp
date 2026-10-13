@@ -249,6 +249,18 @@ static void GetTerminalSize(int& rows, int& cols) {
 
 #endif  // _WIN32
 
+// Tidur portabel (milidetik).
+static void SleepMs(int ms) {
+#ifdef _WIN32
+    Sleep(ms);
+#else
+    struct timespec ts;
+    ts.tv_sec = ms / 1000;
+    ts.tv_nsec = (long)(ms % 1000) * 1000000L;
+    nanosleep(&ts, nullptr);
+#endif
+}
+
 // ===========================================================================
 // Berkas & path
 // ===========================================================================
@@ -2515,6 +2527,7 @@ static void PrintHelp() {
         "  nxzilla ls [path]          list a remote folder\n"
         "  nxzilla use <profile>      set the profile for this working folder\n"
         "  nxzilla edit <file>        pull a file, edit it, upload it back\n"
+        "  nxzilla watch [secs]       poll for changes (--once to run a single pass)\n"
         "  nxzilla ignore <pattern>   add an ignore pattern\n"
         "  nxzilla --help             help\n"
         "  nxzilla --version          version\n"
@@ -2856,6 +2869,69 @@ int main(int argc, char** argv) {
             Out(exists ? "nxzilla: pattern already present: " : "nxzilla: ignore added: ");
             Out(pat + "\n");
             return 0;
+        }
+        if (a == "watch") {
+            std::string cwd0 = CurrentDir();
+            std::vector<Project> ps = LoadProjects();
+            std::vector<Profile> prs = LoadProfiles();
+            const Project* proj = nullptr;
+            bool hasName = (args.size() >= 2 && args[1][0] != '-' &&
+                            !isdigit((unsigned char)args[1][0]));
+            if (hasName) {
+                for (const auto& p : ps) if (p.name == args[1]) { proj = &p; break; }
+                if (!proj) { Out("nxzilla: project '" + args[1] + "' not found.\n"); return 1; }
+            } else {
+                for (const auto& p : ps) if (p.localPath == cwd0) { proj = &p; break; }
+                if (!proj) { Out("nxzilla: this folder is not a registered project.\n"); return 1; }
+            }
+            const Profile* pr = nullptr;
+            for (const auto& q : prs) if (q.name == proj->profile) { pr = &q; break; }
+            if (!pr) { Out("nxzilla: profile not found.\n"); return 1; }
+            std::string effPath = proj->remotePath.empty() ? pr->remotePath : proj->remotePath;
+            Profile use = *pr;
+            use.remotePath = effPath;
+
+            // Interval detik (default 10). --once = sekali lalu keluar.
+            int interval = 10;
+            bool once = false;
+            for (size_t i = 1; i < args.size(); ++i) {
+                if (args[i] == "--once") once = true;
+                else if (!args[i].empty() && isdigit((unsigned char)args[i][0])) interval = atoi(args[i].c_str());
+            }
+            if (interval < 1) interval = 1;
+
+            std::vector<std::string> ignore = LoadProjectIgnore(proj->localPath);
+            Out("Watching " + proj->name + " (" + pr->protocol + "://" + pr->host + ":" +
+                std::to_string(pr->port) + effPath + ") every " + std::to_string(interval) + "s");
+            Out(once ? " (once).\n" : ". Press Ctrl+C to stop.\n");
+
+            int iter = 0;
+            for (;;) {
+                iter++;
+                std::vector<DiffItem> plan;
+                std::string err;
+                char tb[32];
+                time_t now = time(nullptr); tm* lt = localtime(&now);
+                if (lt) strftime(tb, sizeof(tb), "%H:%M:%S", lt); else tb[0] = 0;
+                if (!BuildPlan(use, effPath, proj->localPath, ignore, plan, err)) {
+                    Out("[" + std::string(tb) + "] error: " + err + "\n");
+                } else if (plan.empty()) {
+                    Out("[" + std::string(tb) + "] up to date.\n");
+                } else {
+                    int aN = 0, dN = 0, mN = 0, cN = 0;
+                    for (const auto& it : plan) {
+                        if (it.kind == 'A') aN++;
+                        else if (it.kind == 'D') dN++;
+                        else { mN++; if (it.conflict) cN++; }
+                    }
+                    Out("[" + std::string(tb) + "] " + std::to_string(plan.size()) +
+                        " change(s): " + std::to_string(aN) + " local-only, " +
+                        std::to_string(dN) + " remote-only, " + std::to_string(mN) +
+                        " modified" + (cN ? (", " + std::to_string(cN) + " CONFLICT") : "") + "\n");
+                }
+                if (once) return 0;
+                SleepMs(interval * 1000);
+            }
         }
         if (a == "edit" && args.size() >= 2 && args[1][0] != '-') {
             std::string cwd0 = CurrentDir();

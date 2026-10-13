@@ -90,6 +90,10 @@ Fitur yang sudah jalan (v1.0.0):
 - **Onboarding**: menjalankan `nxzilla` di folder non-proyek (yang belum
   terdaftar) langsung menawarkan *"Register it and pull the remote project into
   this folder?"* → form setup terbuka dengan folder sudah terisi.
+- **`nxzilla edit <berkas>`**: tarik berkas, buka di `$EDITOR`, unggah balik
+  otomatis saat editor ditutup.
+- **`nxzilla watch [detik]`**: pantau perubahan remote berkala (mode `--once`
+  untuk script/CI).
 - **Kredensial** tidak disimpan polos (obfuskasi); `NXZILLA_PASSWORD` untuk
   non-interaktif.
 - Fallback teks non-interaktif, `--version`, `--help`. Semua teks UI Inggris.
@@ -111,6 +115,8 @@ nxzilla status               # tampilkan status sinkronisasi (tanpa mengubah)
 nxzilla ls [path]            # daftar isi folder remote (tanpa menarik berkas)
 nxzilla use <nama-profil>    # set profil untuk folder kerja saat ini
 nxzilla ignore <pola>        # tambah pola ignore ke .nxzilla.json
+nxzilla edit <berkas>        # tarik berkas, buka di editor, unggah balik
+nxzilla watch [detik]        # pantau perubahan remote berkala (--once sekali)
 nxzilla push --dry-run       # simulasi, tampilkan berkas yang akan ditransfer
 nxzilla push --force         # timpa berkas konflik
 nxzilla push --checksum      # banding pakai SHA-1
