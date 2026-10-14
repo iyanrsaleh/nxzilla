@@ -92,6 +92,7 @@ Fitur yang sudah jalan (v1.0.0):
   this folder?"* → form setup terbuka dengan folder sudah terisi.
 - **`nxzilla edit <berkas>`**: tarik berkas, buka di `$EDITOR`, unggah balik
   otomatis saat editor ditutup.
+- **`nxzilla diff <berkas>`**: perbedaan baris remote vs lokal (berwarna).
 - **`nxzilla watch [detik]`**: pantau perubahan remote berkala (mode `--once`
   untuk script/CI).
 - **Cache metadata** remote (`.nxzilla-cache.json`) agar `status` berulang cepat;
@@ -120,6 +121,7 @@ nxzilla ls [path]            # daftar isi folder remote (tanpa menarik berkas)
 nxzilla use <nama-profil>    # set profil untuk folder kerja saat ini
 nxzilla ignore <pola>        # tambah pola ignore ke .nxzilla.json
 nxzilla edit <berkas>        # tarik berkas, buka di editor, unggah balik
+nxzilla diff <berkas>        # tampilkan perbedaan remote vs lokal
 nxzilla watch [detik]        # pantau perubahan remote berkala (--once sekali)
 nxzilla push --dry-run       # simulasi, tampilkan berkas yang akan ditransfer
 nxzilla push --force         # timpa berkas konflik

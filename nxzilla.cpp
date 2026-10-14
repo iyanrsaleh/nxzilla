@@ -11,7 +11,7 @@
 // Windows & Linux, satu basis kode. Backend koneksi memakai subprocess
 // OpenSSH (ssh/sftp/scp) sehingga tanpa dependensi pihak ketiga.
 
-#define NXZILLA_VERSION "1.1.1"
+#define NXZILLA_VERSION "1.1.2"
 
 #define _CRT_SECURE_NO_WARNINGS
 #include <cstdio>
@@ -1950,6 +1950,48 @@ static void SaveSyncedBaseline(const Profile& pr, const std::string& remotePath,
 // ===========================================================================
 // Utilitas tampilan
 // ===========================================================================
+// Diff baris sederhana (LCS). Menghasilkan teks unified-like.
+static std::vector<std::string> SplitLines(const std::string& s) {
+    std::vector<std::string> out;
+    size_t i = 0;
+    while (i <= s.size()) {
+        size_t e = s.find('\n', i);
+        if (e == std::string::npos) { if (i < s.size()) out.push_back(s.substr(i)); break; }
+        std::string line = s.substr(i, e - i);
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        out.push_back(line);
+        i = e + 1;
+    }
+    return out;
+}
+
+// Tampilkan perbedaan dua berkas. return jumlah baris berbeda.
+static int PrintDiff(const std::string& a, const std::string& b,
+                     const std::string& labelA, const std::string& labelB) {
+    std::vector<std::string> A = SplitLines(a), B = SplitLines(b);
+    size_t n = A.size(), m = B.size();
+    // LCS table
+    std::vector<std::vector<int>> dp(n + 1, std::vector<int>(m + 1, 0));
+    for (size_t i = n; i-- > 0;)
+        for (size_t j = m; j-- > 0;)
+            dp[i][j] = (A[i] == B[j]) ? dp[i+1][j+1] + 1
+                                      : (std::max)(dp[i+1][j], dp[i][j+1]);
+    int changes = 0;
+    size_t i = 0, j = 0;
+    bool headerShown = false;
+    auto header = [&]() {
+        if (!headerShown) { Out("--- " + labelA + "\n+++ " + labelB + "\n"); headerShown = true; }
+    };
+    while (i < n && j < m) {
+        if (A[i] == B[j]) { i++; j++; }
+        else if (dp[i+1][j] >= dp[i][j+1]) { header(); Out("\x1b[1;31m-" + A[i] + "\x1b[0m\n"); i++; changes++; }
+        else { header(); Out("\x1b[1;32m+" + B[j] + "\x1b[0m\n"); j++; changes++; }
+    }
+    while (i < n) { header(); Out("\x1b[1;31m-" + A[i] + "\x1b[0m\n"); i++; changes++; }
+    while (j < m) { header(); Out("\x1b[1;32m+" + B[j] + "\x1b[0m\n"); j++; changes++; }
+    return changes;
+}
+
 // Format ukuran byte -> "1.2 KB", "3.4 MB".
 static std::string HumanBytes(long long b) {
     if (b < 1024) return std::to_string(b) + " B";
@@ -2737,6 +2779,7 @@ static void PrintHelp() {
         "  nxzilla ls [path]          list a remote folder\n"
         "  nxzilla use <profile>      set the profile for this working folder\n"
         "  nxzilla edit <file>        pull a file, edit it, upload it back\n"
+        "  nxzilla diff <file>        show differences (remote vs local)\n"
         "  nxzilla watch [secs]       poll for changes (--once to run a single pass)\n"
         "  nxzilla ignore <pattern>   add an ignore pattern\n"
         "  nxzilla --help             help\n"
@@ -3166,6 +3209,53 @@ int main(int argc, char** argv) {
                 if (once) return 0;
                 SleepMs(interval * 1000);
             }
+        }
+        if (a == "diff" && args.size() >= 2 && args[1][0] != '-') {
+            std::string cwd0 = CurrentDir();
+            std::vector<Project> ps = LoadProjects();
+            std::vector<Profile> prs = LoadProfiles();
+            const Project* proj = nullptr;
+            for (const auto& p : ps) if (p.localPath == cwd0) { proj = &p; break; }
+            if (!proj) { Out("nxzilla: this folder is not a registered project.\n"); return 1; }
+            const Profile* pr = nullptr;
+            for (const auto& q : prs) if (q.name == proj->profile) { pr = &q; break; }
+            if (!pr || pr->host.empty()) { Out("nxzilla: profile missing or has no host.\n"); return 1; }
+            std::string effPath = proj->remotePath.empty() ? pr->remotePath : proj->remotePath;
+            Profile use = *pr;
+            use.remotePath = effPath;
+
+            std::string rel = args[1];
+            for (char& c : rel) if (c == '\\') c = '/';
+            while (!rel.empty() && rel[0] == '/') rel.erase(0, 1);
+            if (!SafeRel(rel)) { Out("nxzilla: unsafe path.\n"); return 1; }
+
+            std::string localFile = proj->localPath;
+            if (localFile.back() != '/' && localFile.back() != '\\') localFile += kPathSep;
+            std::string relOs = rel;
+            for (char& c : relOs) if (c == '/') c = kPathSep;
+            localFile += relOs;
+
+            std::string localText = ReadFileText(localFile);
+            if (localText.empty() && !FileExists(localFile))
+                Out("nxzilla: (local file missing)\n");
+
+            // Ambil versi remote ke file sementara.
+            EnsureDir(ConfigDir());
+            std::string tmp;
+            JoinPath(ConfigDir(), "diff_tmp", tmp);
+            std::string gerr;
+            if (!RemoteGet(use, rel, tmp, gerr)) {
+                Out("nxzilla: cannot fetch remote '" + rel + "': " + gerr + "\n");
+                remove(tmp.c_str());
+                return 1;
+            }
+            std::string remoteText = ReadFileText(tmp);
+            remove(tmp.c_str());
+
+            int changes = PrintDiff(remoteText, localText, "remote:" + rel, "local:" + rel);
+            if (changes == 0) Out("nxzilla: '" + rel + "' is identical (remote vs local).\n");
+            else Out("\n" + std::to_string(changes) + " line(s) differ  (- remote, + local).\n");
+            return 0;
         }
         if (a == "edit" && args.size() >= 2 && args[1][0] != '-') {
             std::string cwd0 = CurrentDir();
