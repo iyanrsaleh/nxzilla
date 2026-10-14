@@ -493,15 +493,20 @@ Ketentuan lintas platform:
 
 ## 7. Roadmap per Fase
 
-> **Status v1.0.0 (rilis).** Berikut yang sudah selesai dan teruji:
+> **Status v1.2.1 (rilis).** Fase 0–7 inti sudah selesai dan teruji:
 > Fase 0 (build Windows **dan** Linux hijau), Fase 1 (profil & konfigurasi),
-> Fase 2 (SSH/SFTP — routing terverifikasi; transfer penuh menunggu server uji),
-> Fase 3 (FTP/FTPS — teruji penuh), Fase 4 (mesin sinkron, ignore, konflik +
-> `--force`, `--dry-run`, `--checksum`), Fase 5 (registry, `add`/`scan`/`use`/
-> `ignore`/`remove`, ruang global), Fase 6 (TUI dua konteks + progress transfer),
-> dan Fase 7 sebagian (obfuskasi kredensial + `NXZILLA_PASSWORD`).
-> **Belum:** OS keyring, `watch`/`edit`, statistik kecepatan, uji transfer SSH
-> nyata. (Onboarding folder otomatis sudah dikerjakan.)
+> Fase 2 (SSH/SFTP — **teruji penuh** ke server SSH nyata), Fase 3 (FTP/FTPS —
+> teruji penuh), Fase 4 (sinkron ukuran+mtime, ignore, konflik + `--force`,
+> `--dry-run`, `--checksum` SHA-1), Fase 5 (registry, `add`/`scan`/`use`/
+> `ignore`/`remove`/`env`, ruang global), Fase 6 (TUI dua konteks, progress,
+> statistik), Fase 7 (**keyring OS**: Windows Credential Manager + Linux
+> `secret-tool`).
+>
+> Fitur tambahan yang sudah ada: onboarding, `edit`, `diff`, `undo`, `watch`,
+> multi-environment (staging/prod), cache metadata remote, optimasi transfer
+> FTP (batch satu sesi curl), penjagaan path traversal.
+>
+> **Belum:** cache hash untuk `--checksum`, refactor modular + CMake.
 
 ### Fase 0 — Bootstrap
 - Kerangka repo, `build.bat`, `build.sh`, `.gitignore`, `LICENSE`.
@@ -617,20 +622,21 @@ nol (bungkus `rsync`/`lftp`/`sftp`).
 
 ## 11. Langkah Berikutnya
 
-**v1.0.0 sudah rilis** (Windows + Linux). Alur inti sudah hidup dan teruji:
-`nxzilla add`/`scan` → `pull` (tarik proyek ke cd) → edit lokal → `push`
-(kirim balik), dengan diff A/D/M, `ignore`, konflik + `--force`, `--dry-run`,
-dan `--checksum`; plus TUI dengan progress.
+**v1.2.1 sudah rilis** (Windows + Linux). Alur inti lengkap dan teruji di kedua
+protokol (FTP/FTPS & SSH/SFTP):
 
-Sisa untuk v1.1+:
+- `nxzilla add`/`scan`/`onboarding` → `pull` (tarik proyek ke cd) → edit lokal
+  (`edit`) → `push` (kirim balik), dengan diff A/D/M, `ignore`, konflik +
+  `--force`, `--dry-run`, `--checksum`.
+- `status` (cache cepat), `diff`, `undo`, `watch`, `env` (staging/prod),
+  `use`/`ignore`/`remove`.
+- TUI dua konteks + progress + statistik.
+- Kredensial di **keyring OS** (Windows + Linux), fallback obfuskasi.
+- Optimasi: transfer FTP batch (satu sesi curl), cache metadata remote.
+- Penjagaan path traversal + pesan error yang jelas (audit).
 
-1. **OS keyring** untuk kredensial (Windows Credential Manager / `libsecret`) —
-   menggantikan obfuskasi.
-2. **Uji transfer SSH nyata** (aktifkan `openssh-server` di WSL) untuk menutup
-   Fase 2 sepenuhnya.
-3. **`nxzilla watch`** (pantau perubahan remote) dan **`nxzilla edit <file>`**
-   (tarik → edit di `$EDITOR` → unggah).
-4. **Statistik transfer** (jumlah byte, kecepatan, durasi).
-5. **Onboarding folder otomatis**: tawarkan membuat `.nxzilla.json` saat
-   `nxzilla` dijalankan di folder non-proyek.
-6. **Klarifikasi "nxzilla plus"** (bagian 10 nomor 6).
+Sisa untuk rilis berikutnya:
+
+1. **Cache hash** untuk `--checksum` (hindari unduh ulang berkas yang sama).
+2. **Refactor modular + CMake** bila `nxzilla.cpp` (~3600 baris) mulai berat.
+3. **Klarifikasi "nxzilla plus"** (bagian 10 nomor 6).

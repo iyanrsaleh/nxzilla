@@ -11,7 +11,7 @@
 // Windows & Linux, satu basis kode. Backend koneksi memakai subprocess
 // OpenSSH (ssh/sftp/scp) sehingga tanpa dependensi pihak ketiga.
 
-#define NXZILLA_VERSION "1.2.1"
+#define NXZILLA_VERSION "1.2.2"
 
 #define _CRT_SECURE_NO_WARNINGS
 #include <cstdio>
@@ -3423,6 +3423,12 @@ int main(int argc, char** argv) {
             Out("Undo complete: " + std::to_string(done) + " file(s) reverted.\n");
             return 0;
         }
+        if (a == "diff") {
+            if (args.size() < 2 || args[1][0] == '-') {
+                Out("nxzilla: usage: nxzilla diff <file>\n");
+                return 1;
+            }
+        }
         if (a == "diff" && args.size() >= 2 && args[1][0] != '-') {
             std::string cwd0 = CurrentDir();
             std::vector<Project> ps = LoadProjects();
@@ -3469,6 +3475,12 @@ int main(int argc, char** argv) {
             if (changes == 0) Out("nxzilla: '" + rel + "' is identical (remote vs local).\n");
             else Out("\n" + std::to_string(changes) + " line(s) differ  (- remote, + local).\n");
             return 0;
+        }
+        if (a == "edit") {
+            if (args.size() < 2 || args[1][0] == '-') {
+                Out("nxzilla: usage: nxzilla edit <file>\n");
+                return 1;
+            }
         }
         if (a == "edit" && args.size() >= 2 && args[1][0] != '-') {
             std::string cwd0 = CurrentDir();

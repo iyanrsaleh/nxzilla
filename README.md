@@ -6,7 +6,7 @@ Buka terminal di folder proyek, jalankan `nxzilla`, dan berkas proyek remote
 masuk ke folder kerja (cd) tersebut. Perubahan dikirim balik ke server lewat
 perintah. Satu alur, dari terminal.
 
-**Versi terbaru: v1.0.0** — unduh biner siap pakai di
+**Versi terbaru: v1.2.1** — unduh biner siap pakai di
 [halaman Releases](https://github.com/iyanrsaleh/nxzilla/releases):
 `nxzilla-windows-x64.exe` (Windows) dan `nxzilla-linux-x64` (Linux).
 
@@ -70,7 +70,7 @@ yang memakai Nxzilla**, dan membuka salah satunya dari situ.
 
 ## Status saat ini
 
-Fitur yang sudah jalan (v1.0.0):
+Fitur yang sudah jalan (v1.2.1):
 
 - **Build hijau di Windows (MSVC) dan Linux (g++)** — satu basis kode.
 - **Backend koneksi**: FTP/FTPS (via `curl`) dan SSH/SFTP (via OpenSSH
@@ -107,8 +107,8 @@ Fitur yang sudah jalan (v1.0.0):
   untuk non-interaktif.
 - Fallback teks non-interaktif, `--version`, `--help`. Semua teks UI Inggris.
 
-Belum ada (rencana): OS keyring (kredensial), `watch`/`edit <file>`, statistik
-kecepatan, onboarding folder otomatis. Lihat `RENCANA.md`.
+Belum ada / rencana: `--checksum` dengan cache hash, refactor modular + CMake.
+Lihat `RENCANA.md`.
 
 ## Perintah
 
