@@ -734,10 +734,29 @@ static std::string Deobfuscate(const std::string& stored) {
 }
 
 // ===========================================================================
-// OS keyring (Windows Credential Manager). Di Linux: fallback obfuskasi.
+// OS keyring (Windows Credential Manager; Linux via secret-tool/libsecret).
 // ===========================================================================
+static int RunCapture(const std::string& cmd, std::string& out);
+static int RunWithInput(const std::string& cmd, const std::string& input, std::string& out);
+static std::string ShellQuoteD(const std::string& s);
+
 [[maybe_unused]] static std::string KeyringTarget(const std::string& profileName) {
     return "Nxzilla/" + profileName;
+}
+
+// Linux: apakah `secret-tool` tersedia?
+[[maybe_unused]] static bool HaveSecretTool() {
+#ifdef _WIN32
+    return false;
+#else
+    static int cached = -1;
+    if (cached < 0) {
+        std::string out;
+        cached = (RunCapture("command -v secret-tool >/dev/null 2>&1 && echo yes", out) == 0 &&
+                  out.find("yes") != std::string::npos) ? 1 : 0;
+    }
+    return cached == 1;
+#endif
 }
 
 // Simpan password ke keyring OS. return true bila berhasil.
@@ -753,8 +772,12 @@ static bool KeyringStore(const std::string& profileName, const std::string& pass
     cred.UserName = const_cast<char*>(profileName.c_str());
     return CredWriteA(&cred, 0) != 0;
 #else
-    (void)profileName; (void)password;
-    return false;  // Linux: pakai obfuskasi di file
+    if (!HaveSecretTool()) return false;
+    // secret-tool store membaca secret dari stdin.
+    std::string cmd = "secret-tool store --label=" + ShellQuoteD(KeyringTarget(profileName)) +
+                      " nxzilla " + ShellQuoteD(profileName);
+    std::string out;
+    return RunWithInput(cmd, password + "\n", out) == 0;
 #endif
 }
 
@@ -764,7 +787,9 @@ static void KeyringDelete(const std::string& profileName) {
     std::string target = KeyringTarget(profileName);
     CredDeleteA(target.c_str(), CRED_TYPE_GENERIC, 0);
 #else
-    (void)profileName;
+    if (!HaveSecretTool()) return;
+    std::string out;
+    RunCapture("secret-tool clear nxzilla " + ShellQuoteD(profileName) + " 2>&1", out);
 #endif
 }
 
@@ -780,8 +805,13 @@ static std::string KeyringGet(const std::string& profileName) {
     CredFree(cred);
     return pw;
 #else
-    (void)profileName;
-    return "";
+    if (!HaveSecretTool()) return "";
+    std::string out;
+    if (RunCapture("secret-tool lookup nxzilla " + ShellQuoteD(profileName) + " 2>/dev/null", out) != 0)
+        return "";
+    // buang newline akhir
+    while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) out.pop_back();
+    return out;
 #endif
 }
 
@@ -1003,6 +1033,16 @@ static std::string ShellQuoteD(const std::string& s) {
     }
     r += "\"";
     return r;
+}
+
+// Jalankan perintah sambil mengirim `input` ke stdin-nya (via file sementara).
+[[maybe_unused]] static int RunWithInput(const std::string& cmd, const std::string& input, std::string& out) {
+    EnsureDir(ConfigDir());
+    std::string tmp;
+    JoinPath(ConfigDir(), "stdin_tmp", tmp);
+    WriteFileText(tmp, input);
+    std::string full = cmd + " < " + ShellQuoteD(tmp);
+    return RunCapture(full, out);
 }
 
 // Alamat dasar FTP: ftp://host:port/path

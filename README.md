@@ -97,7 +97,8 @@ Fitur yang sudah jalan (v1.0.0):
 - **Cache metadata** remote (`.nxzilla-cache.json`) agar `status` berulang cepat;
   `--refresh` memaksa pemindaian ulang. `push`/`pull` selalu memindai ulang.
 - **Kredensial**: password disimpan di **keyring OS** (Windows Credential Manager;
-  Linux fallback obfuskasi); `NXZILLA_PASSWORD` untuk non-interaktif.
+  Linux via `secret-tool`/libsecret, fallback obfuskasi); `NXZILLA_PASSWORD`
+  untuk non-interaktif.
 - Fallback teks non-interaktif, `--version`, `--help`. Semua teks UI Inggris.
 
 Belum ada (rencana): OS keyring (kredensial), `watch`/`edit <file>`, statistik
@@ -223,6 +224,8 @@ Hasil: `nxzilla.exe` (Windows) atau `nxzilla` (Linux). Tambahkan folder ini ke
 
 FTP/FTPS memerlukan `curl` di PATH; SSH/SFTP memerlukan klien OpenSSH (`ssh`,
 `sftp`) — keduanya tersedia bawaan di Windows 10/11 dan mayoritas distro Linux.
+Untuk keyring di Linux, pasang `libsecret-tools` (dan `gnome-keyring`/KWallet
+yang menyediakan secret service).
 
 ## Struktur repo
 
