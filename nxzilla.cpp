@@ -11,7 +11,7 @@
 // Windows & Linux, satu basis kode. Backend koneksi memakai subprocess
 // OpenSSH (ssh/sftp/scp) sehingga tanpa dependensi pihak ketiga.
 
-#define NXZILLA_VERSION "1.1.2"
+#define NXZILLA_VERSION "1.2.0"
 
 #define _CRT_SECURE_NO_WARNINGS
 #include <cstdio>
@@ -888,9 +888,16 @@ static std::vector<std::string> LoadProjectIgnore(const std::string& projectDir)
     return out;
 }
 
-// Baca profil & remotePath dari .nxzilla.json di sebuah folder proyek.
-static bool LoadProjectConfig(const std::string& projectDir, std::string& profile,
-                              std::string& remotePath) {
+// Satu target lingkungan (nama -> profil + remotePath).
+struct EnvEntry {
+    std::string name, profile, remotePath;
+};
+
+// Baca seluruh isi .nxzilla.json: profil/remotePath efektif (dari 'active' bila
+// ada), daftar environments, dan nama active.
+static bool LoadProjectFull(const std::string& projectDir, std::string& profile,
+                            std::string& remotePath, std::vector<EnvEntry>& envs,
+                            std::string& active) {
     std::string path;
     if (!JoinPath(projectDir, ".nxzilla.json", path)) return false;
     std::string raw = ReadFileText(path);
@@ -900,16 +907,88 @@ static bool LoadProjectConfig(const std::string& projectDir, std::string& profil
     if (!jp.parse(root)) return false;
     profile = root.str("profile");
     remotePath = root.str("remotePath");
+    active = root.str("active");
+    const JVal* arr = root.arr("environments");
+    if (arr) {
+        for (const JVal& e : arr->items) {
+            EnvEntry en;
+            en.name = e.str("name");
+            en.profile = e.str("profile");
+            en.remotePath = e.str("remotePath");
+            if (!en.name.empty()) envs.push_back(std::move(en));
+        }
+    }
+    // Bila ada 'active', timpa profil/remotePath efektif.
+    if (!active.empty()) {
+        for (const auto& en : envs)
+            if (en.name == active) { profile = en.profile; remotePath = en.remotePath; break; }
+    }
     return true;
 }
 
-// Tulis .nxzilla.json.
+// Baca profil & remotePath efektif dari .nxzilla.json (menghormati 'active').
+static bool LoadProjectConfig(const std::string& projectDir, std::string& profile,
+                              std::string& remotePath) {
+    std::vector<EnvEntry> envs;
+    std::string active;
+    return LoadProjectFull(projectDir, profile, remotePath, envs, active);
+}
+
+// Tulis .nxzilla.json (mempertahankan environments bila ada).
 static bool SaveProjectConfig(const std::string& projectDir, const std::string& profile,
                               const std::string& remotePath,
                               const std::vector<std::string>& ignore) {
+    // Baca environments lama agar tidak hilang.
+    std::vector<EnvEntry> envs;
+    std::string p0, r0, active0;
+    LoadProjectFull(projectDir, p0, r0, envs, active0);
+
     std::string j = "{\n";
     j += "  \"profile\": \"" + EscapeJson(profile) + "\",\n";
     j += "  \"remotePath\": \"" + EscapeJson(remotePath) + "\",\n";
+    if (!envs.empty()) {
+        j += "  \"active\": \"" + EscapeJson(active0) + "\",\n";
+        j += "  \"environments\": [\n";
+        for (size_t i = 0; i < envs.size(); ++i) {
+            j += "    { \"name\": \"" + EscapeJson(envs[i].name) + "\", \"profile\": \"" +
+                 EscapeJson(envs[i].profile) + "\", \"remotePath\": \"" +
+                 EscapeJson(envs[i].remotePath) + "\" }";
+            if (i + 1 < envs.size()) j += ",";
+            j += "\n";
+        }
+        j += "  ],\n";
+    }
+    j += "  \"ignore\": [";
+    for (size_t i = 0; i < ignore.size(); ++i) {
+        j += "\"" + EscapeJson(ignore[i]) + "\"";
+        if (i + 1 < ignore.size()) j += ", ";
+    }
+    j += "]\n}\n";
+    std::string path;
+    if (!JoinPath(projectDir, ".nxzilla.json", path)) return false;
+    return WriteFileText(path, j);
+}
+
+// Tulis .nxzilla.json dengan daftar environments + active tertentu.
+static bool SaveEnvironments(const std::string& projectDir, const std::vector<EnvEntry>& envs,
+                             const std::string& active, const std::vector<std::string>& ignore) {
+    std::string profile, remotePath;
+    // Nilai efektif = profil/remote dari active (bila ada).
+    for (const auto& e : envs)
+        if (e.name == active) { profile = e.profile; remotePath = e.remotePath; break; }
+    std::string j = "{\n";
+    j += "  \"profile\": \"" + EscapeJson(profile) + "\",\n";
+    j += "  \"remotePath\": \"" + EscapeJson(remotePath) + "\",\n";
+    j += "  \"active\": \"" + EscapeJson(active) + "\",\n";
+    j += "  \"environments\": [\n";
+    for (size_t i = 0; i < envs.size(); ++i) {
+        j += "    { \"name\": \"" + EscapeJson(envs[i].name) + "\", \"profile\": \"" +
+             EscapeJson(envs[i].profile) + "\", \"remotePath\": \"" +
+             EscapeJson(envs[i].remotePath) + "\" }";
+        if (i + 1 < envs.size()) j += ",";
+        j += "\n";
+    }
+    j += "  ],\n";
     j += "  \"ignore\": [";
     for (size_t i = 0; i < ignore.size(); ++i) {
         j += "\"" + EscapeJson(ignore[i]) + "\"";
@@ -2778,6 +2857,7 @@ static void PrintHelp() {
         "  nxzilla status             sync status (read-only)\n"
         "  nxzilla ls [path]          list a remote folder\n"
         "  nxzilla use <profile>      set the profile for this working folder\n"
+        "  nxzilla env [name]         list/switch environment (staging/prod)\n"
         "  nxzilla edit <file>        pull a file, edit it, upload it back\n"
         "  nxzilla diff <file>        show differences (remote vs local)\n"
         "  nxzilla watch [secs]       poll for changes (--once to run a single pass)\n"
@@ -2846,10 +2926,21 @@ int main(int argc, char** argv) {
                     return 1;
                 }
             }
+            // Bila folder proyek punya .nxzilla.json dengan environment aktif,
+            // pakai profil/remotePath efektifnya (menimpa nilai registry).
+            std::string wantProfile = proj->profile;
+            std::string wantRemote = proj->remotePath;
+            {
+                std::string cfgProf, cfgRemote;
+                if (LoadProjectConfig(proj->localPath, cfgProf, cfgRemote) && !cfgProf.empty()) {
+                    wantProfile = cfgProf;
+                    wantRemote = cfgRemote;
+                }
+            }
             const Profile* pr = nullptr;
-            for (const auto& q : prs) if (q.name == proj->profile) { pr = &q; break; }
+            for (const auto& q : prs) if (q.name == wantProfile) { pr = &q; break; }
             if (!pr) {
-                Out("nxzilla: profile '" + proj->profile + "' not found in connections.json.\n");
+                Out("nxzilla: profile '" + wantProfile + "' not found in connections.json.\n");
                 return 1;
             }
             if (pr->host.empty()) {
@@ -2857,7 +2948,7 @@ int main(int argc, char** argv) {
                     "Run `nxzilla` -> press [c] to edit the profile.\n");
                 return 1;
             }
-            std::string effectivePath = proj->remotePath.empty() ? pr->remotePath : proj->remotePath;
+            std::string effectivePath = wantRemote.empty() ? pr->remotePath : wantRemote;
             Profile use = *pr;
             use.remotePath = effectivePath;
 
@@ -3101,6 +3192,47 @@ int main(int argc, char** argv) {
                 std::chrono::steady_clock::now() - tStart).count();
             Out(TransferSummary("Pulled", done, bytes, elapsed2) + ".\n");
             if (conflicts) Out(std::to_string(conflicts) + " conflict(s) skipped (use --force).\n");
+            return 0;
+        }
+        if (a == "env") {
+            std::string cwd0 = CurrentDir();
+            std::vector<EnvEntry> envs;
+            std::string prof, rp, active;
+            if (!LoadProjectFull(cwd0, prof, rp, envs, active)) {
+                Out("nxzilla: no .nxzilla.json here (run inside a project).\n");
+                return 1;
+            }
+            // `env` tanpa argumen: daftar.
+            if (args.size() < 2 || args[1][0] == '-') {
+                if (envs.empty()) {
+                    Out("nxzilla: no environments defined. (using profile '" + prof +
+                        "', remote '" + rp + "')\n");
+                } else {
+                    Out("Environments" + (active.empty() ? "" : " (active: " + active + ")") + ":\n");
+                    for (const auto& e : envs) {
+                        std::string mark = (e.name == active) ? " *" : "  ";
+                        Out(mark + " " + e.name + "  (profile: " + e.profile +
+                            ", remote: " + e.remotePath + ")\n");
+                    }
+                }
+                return 0;
+            }
+            // `env <nama>`: set aktif.
+            const std::string& want = args[1];
+            bool found = false;
+            for (const auto& e : envs) if (e.name == want) { found = true; break; }
+            if (!found) {
+                Out("nxzilla: environment '" + want + "' not found.\n");
+                if (!envs.empty()) { Out("Available: "); for (const auto& e : envs) Out(e.name + " "); Out("\n"); }
+                return 1;
+            }
+            std::vector<std::string> ig = LoadProjectIgnore(cwd0);
+            std::string curProf, curRp;
+            LoadProjectConfig(cwd0, curProf, curRp);
+            // Simpan: SaveProjectConfig mempertahankan environments; kita perlu set 'active'.
+            // Tulis ulang lewat helper khusus.
+            SaveEnvironments(cwd0, envs, want, ig);
+            Out("nxzilla: active environment set to '" + want + "'.\n");
             return 0;
         }
         if (a == "use" && args.size() >= 2) {

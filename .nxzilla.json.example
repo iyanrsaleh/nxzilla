@@ -1,6 +1,11 @@
 {
   "profile": "nxdom-ssh",
   "remotePath": "/var/www/nxdom",
-  "lastSync": "",
-  "ignore": [".git/", "node_modules/", "vendor/", "*.log", ".env"]
+  "ignore": [".git/", "node_modules/", "vendor/", "*.log", ".env"],
+
+  "active": "prod",
+  "environments": [
+    { "name": "prod",    "profile": "nxdom-ssh",    "remotePath": "/var/www/nxdom" },
+    { "name": "staging", "profile": "nxdom-staging","remotePath": "/var/www/nxdom-staging" }
+  ]
 }

@@ -93,6 +93,8 @@ Fitur yang sudah jalan (v1.0.0):
 - **`nxzilla edit <berkas>`**: tarik berkas, buka di `$EDITOR`, unggah balik
   otomatis saat editor ditutup.
 - **`nxzilla diff <berkas>`**: perbedaan baris remote vs lokal (berwarna).
+- **`nxzilla env`**: beberapa target per proyek (staging/produksi); `env <nama>`
+  mengganti target aktif.
 - **`nxzilla watch [detik]`**: pantau perubahan remote berkala (mode `--once`
   untuk script/CI).
 - **Cache metadata** remote (`.nxzilla-cache.json`) agar `status` berulang cepat;
@@ -119,6 +121,7 @@ nxzilla status               # tampilkan status sinkronisasi (tanpa mengubah)
 nxzilla status --refresh     # paksa pemindaian ulang (abaikan cache)
 nxzilla ls [path]            # daftar isi folder remote (tanpa menarik berkas)
 nxzilla use <nama-profil>    # set profil untuk folder kerja saat ini
+nxzilla env [nama]           # lihat/ganti environment (staging/prod)
 nxzilla ignore <pola>        # tambah pola ignore ke .nxzilla.json
 nxzilla edit <berkas>        # tarik berkas, buka di editor, unggah balik
 nxzilla diff <berkas>        # tampilkan perbedaan remote vs lokal
