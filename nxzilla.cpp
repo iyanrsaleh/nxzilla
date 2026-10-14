@@ -11,7 +11,7 @@
 // Windows & Linux, satu basis kode. Backend koneksi memakai subprocess
 // OpenSSH (ssh/sftp/scp) sehingga tanpa dependensi pihak ketiga.
 
-#define NXZILLA_VERSION "1.2.0"
+#define NXZILLA_VERSION "1.2.1"
 
 #define _CRT_SECURE_NO_WARNINGS
 #include <cstdio>
@@ -2860,6 +2860,7 @@ static void PrintHelp() {
         "  nxzilla env [name]         list/switch environment (staging/prod)\n"
         "  nxzilla edit <file>        pull a file, edit it, upload it back\n"
         "  nxzilla diff <file>        show differences (remote vs local)\n"
+        "  nxzilla undo <file|--all>  discard local changes (restore from remote)\n"
         "  nxzilla watch [secs]       poll for changes (--once to run a single pass)\n"
         "  nxzilla ignore <pattern>   add an ignore pattern\n"
         "  nxzilla --help             help\n"
@@ -3341,6 +3342,86 @@ int main(int argc, char** argv) {
                 if (once) return 0;
                 SleepMs(interval * 1000);
             }
+        }
+        if (a == "undo") {
+            std::string cwd0 = CurrentDir();
+            std::vector<Project> ps = LoadProjects();
+            std::vector<Profile> prs = LoadProfiles();
+            const Project* proj = nullptr;
+            for (const auto& p : ps) if (p.localPath == cwd0) { proj = &p; break; }
+            if (!proj) { Out("nxzilla: this folder is not a registered project.\n"); return 1; }
+            // Environment aktif.
+            std::string prof = proj->profile, rp = proj->remotePath;
+            { std::string cp, cr; if (LoadProjectConfig(proj->localPath, cp, cr) && !cp.empty()) { prof = cp; rp = cr; } }
+            const Profile* pr = nullptr;
+            for (const auto& q : prs) if (q.name == prof) { pr = &q; break; }
+            if (!pr || pr->host.empty()) { Out("nxzilla: profile missing or has no host.\n"); return 1; }
+            std::string effPath = rp.empty() ? pr->remotePath : rp;
+            Profile use = *pr;
+            use.remotePath = effPath;
+
+            bool all = false;
+            std::string only;
+            for (size_t i = 1; i < args.size(); ++i) {
+                if (args[i] == "--all") all = true;
+                else if (!args[i].empty() && args[i][0] != '-') only = args[i];
+            }
+            if (!all && only.empty()) {
+                Out("nxzilla: usage: nxzilla undo <file> | nxzilla undo --all\n");
+                return 1;
+            }
+
+            std::vector<std::pair<std::string, char>> targets;  // (rel, kind)
+            if (all) {
+                // Semua berkas yang berubah lokal (A/M) -> kembalikan dari remote.
+                std::vector<std::string> ignore = LoadProjectIgnore(proj->localPath);
+                std::vector<DiffItem> plan;
+                std::string err;
+                if (!BuildPlan(use, effPath, proj->localPath, ignore, plan, err, false, 0)) {
+                    Out("nxzilla: cannot scan: " + err + "\n");
+                    return 1;
+                }
+                for (const auto& it : plan)
+                    if (it.kind == 'A' || it.kind == 'M') targets.push_back({it.rel, it.kind});
+                if (targets.empty()) { Out("nxzilla: nothing to undo (no local changes).\n"); return 0; }
+            } else {
+                std::string rel = only;
+                for (char& c : rel) if (c == '\\') c = '/';
+                while (!rel.empty() && rel[0] == '/') rel.erase(0, 1);
+                if (!SafeRel(rel)) { Out("nxzilla: unsafe path.\n"); return 1; }
+                targets.push_back({rel, 'M'});
+            }
+
+            int done = 0;
+            for (const auto& t : targets) {
+                const std::string& rel = t.first;
+                std::string localFile = proj->localPath;
+                if (localFile.back() != '/' && localFile.back() != '\\') localFile += kPathSep;
+                std::string relOs = rel;
+                for (char& c : relOs) if (c == '/') c = kPathSep;
+                localFile += relOs;
+                // Berkas 'A' (hanya lokal): undo = hapus (tidak ada di remote).
+                if (t.second == 'A') {
+                    if (remove(localFile.c_str()) == 0) {
+                        Out(std::string("  \x1b[1;33m-\x1b[0m ") + rel + "  (removed, was local-only)\n");
+                        done++;
+                    }
+                    continue;
+                }
+                size_t slash = localFile.find_last_of("/\\");
+                if (slash != std::string::npos) EnsureDir(localFile.substr(0, slash));
+                std::string gerr;
+                if (!RemoteGet(use, rel, localFile, gerr)) {
+                    Out("  \x1b[1;31m!\x1b[0m " + rel + "  (not on remote: " + gerr + ")\n");
+                    continue;
+                }
+                long long rs = 0, rm = 0;
+                if (RemoteHeadMeta(use, rel, rs, rm) && rm > 0) SetFileMTime(localFile, rm);
+                Out(std::string("  \x1b[1;32m↩\x1b[0m ") + rel + "  (restored from remote)\n");
+                done++;
+            }
+            Out("Undo complete: " + std::to_string(done) + " file(s) reverted.\n");
+            return 0;
         }
         if (a == "diff" && args.size() >= 2 && args[1][0] != '-') {
             std::string cwd0 = CurrentDir();

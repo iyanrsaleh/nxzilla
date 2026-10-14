@@ -95,6 +95,9 @@ Fitur yang sudah jalan (v1.0.0):
 - **`nxzilla diff <berkas>`**: perbedaan baris remote vs lokal (berwarna).
 - **`nxzilla env`**: beberapa target per proyek (staging/produksi); `env <nama>`
   mengganti target aktif.
+- **`nxzilla undo`**: batalkan perubahan lokal — `undo <berkas>` memulihkan satu
+  berkas dari remote, `undo --all` memulihkan semua yang berubah (berkas
+  lokal-baru dihapus).
 - **`nxzilla watch [detik]`**: pantau perubahan remote berkala (mode `--once`
   untuk script/CI).
 - **Cache metadata** remote (`.nxzilla-cache.json`) agar `status` berulang cepat;
@@ -125,6 +128,7 @@ nxzilla env [nama]           # lihat/ganti environment (staging/prod)
 nxzilla ignore <pola>        # tambah pola ignore ke .nxzilla.json
 nxzilla edit <berkas>        # tarik berkas, buka di editor, unggah balik
 nxzilla diff <berkas>        # tampilkan perbedaan remote vs lokal
+nxzilla undo <berkas|--all>  # batalkan perubahan lokal (kembalikan dari remote)
 nxzilla watch [detik]        # pantau perubahan remote berkala (--once sekali)
 nxzilla push --dry-run       # simulasi, tampilkan berkas yang akan ditransfer
 nxzilla push --force         # timpa berkas konflik
