@@ -81,7 +81,8 @@ Fitur yang sudah jalan (v1.2.1):
 - **`pull` / `push` / `status`** hanya mentransfer berkas yang berubah.
 - **Deteksi konflik**: berkas yang berubah di dua sisi ditandai `CONFLICT` dan
   dilewati; timpa dengan `--force`.
-- **`--checksum`**: banding pakai SHA-1 (akurat walau ukuran & mtime sama).
+- **`--checksum`**: banding pakai SHA-1 (akurat walau ukuran & mtime sama);
+  hash remote di-cache sehingga pemindaian berikutnya tidak mengunduh ulang.
 - **`--dry-run`**: tampilkan rencana transfer tanpa mengubah apa pun.
 - **TUI** keyboard-driven bergaya NxPort: tombol push/pull/status, **progress
   per berkas**, editor profil & proyek.

@@ -11,7 +11,7 @@
 // Windows & Linux, satu basis kode. Backend koneksi memakai subprocess
 // OpenSSH (ssh/sftp/scp) sehingga tanpa dependensi pihak ketiga.
 
-#define NXZILLA_VERSION "1.2.2"
+#define NXZILLA_VERSION "1.3.0"
 
 #define _CRT_SECURE_NO_WARNINGS
 #include <cstdio>
@@ -1717,11 +1717,24 @@ static bool ScanRemote(const Profile& pr, const std::string& remotePath,
 
 // Isi size/mtime (dan hash bila checksum) untuk semua entri hasil ScanRemote.
 // FTP: satu koneksi HEAD untuk semua berkas. SSH: per berkas via stat.
-static void FillRemoteMeta(const Profile& pr, std::vector<RemoteEntry>& out, bool checksum) {
+struct RemoteCache;
+static const RemoteEntry* CacheFind(const RemoteCache& c, const std::string& rel);
+static void FillRemoteMeta(const Profile& pr, std::vector<RemoteEntry>& out, bool checksum,
+                           const RemoteCache* cache = nullptr) {
+    auto cachedHash = [&](const RemoteEntry& e) -> std::string {
+        if (!cache) return "";
+        const RemoteEntry* ce = CacheFind(*cache, e.rel);
+        if (ce && !ce->hash.empty() && ce->size == e.size && ce->mtime == e.mtime)
+            return ce->hash;  // size+mtime sama -> pakai hash lama
+        return "";
+    };
     if (IsSsh(pr)) {
         for (auto& e : out) {
             RemoteHeadMeta(pr, e.rel, e.size, e.mtime);
-            if (checksum) e.hash = RemoteSha1(pr, e.rel);
+            if (checksum) {
+                e.hash = cachedHash(e);
+                if (e.hash.empty()) e.hash = RemoteSha1(pr, e.rel);
+            }
         }
         return;
     }
@@ -1733,7 +1746,10 @@ static void FillRemoteMeta(const Profile& pr, std::vector<RemoteEntry>& out, boo
     for (size_t i = 0; i < out.size() && i < meta.size(); ++i) {
         out[i].size = meta[i].size;
         out[i].mtime = meta[i].mtime;
-        if (checksum) out[i].hash = RemoteSha1(pr, out[i].rel);
+        if (checksum) {
+            out[i].hash = cachedHash(out[i]);
+            if (out[i].hash.empty()) out[i].hash = RemoteSha1(pr, out[i].rel);
+        }
     }
 }
 
@@ -1868,8 +1884,14 @@ static bool SaveBaseline(const std::string& projectDir, const Baseline& b) {
 // ===========================================================================
 struct RemoteCache {
     long long at = 0;                     // waktu scan (epoch detik)
-    std::vector<RemoteEntry> files;       // rel -> size/mtime
+    std::vector<RemoteEntry> files;       // rel -> size/mtime (+hash bila ada)
 };
+
+// Cari entri cache berdasarkan rel. return nullptr bila tak ada.
+static const RemoteEntry* CacheFind(const RemoteCache& c, const std::string& rel) {
+    for (const auto& e : c.files) if (e.rel == rel) return &e;
+    return nullptr;
+}
 
 static std::string CachePath(const std::string& projectDir) {
     std::string p;
@@ -1895,6 +1917,7 @@ static RemoteCache LoadCache(const std::string& projectDir) {
         const JVal* m = e.find("mtime");
         x.size = (s && s->type == JVal::NUM) ? (long long)s->number : -1;
         x.mtime = (m && m->type == JVal::NUM) ? (long long)m->number : 0;
+        x.hash = e.str("hash");
         if (!x.rel.empty()) c.files.push_back(std::move(x));
     }
     return c;
@@ -1906,7 +1929,8 @@ static void SaveCache(const std::string& projectDir, const std::vector<RemoteEnt
     for (size_t i = 0; i < files.size(); ++i) {
         const RemoteEntry& e = files[i];
         j += "    { \"rel\": \"" + EscapeJson(e.rel) + "\", \"size\": " +
-             std::to_string(e.size) + ", \"mtime\": " + std::to_string(e.mtime) + " }";
+             std::to_string(e.size) + ", \"mtime\": " + std::to_string(e.mtime) +
+             ", \"hash\": \"" + EscapeJson(e.hash) + "\" }";
         if (i + 1 < files.size()) j += ",";
         j += "\n";
     }
@@ -1990,9 +2014,11 @@ static bool GetRemoteEntries(const Profile& pr, const std::string& remotePath,
             return true;
         }
     }
+    RemoteCache cache = LoadCache(localDir);  // untuk reuse hash (--checksum)
     if (!ScanRemote(pr, remotePath, "", 0, remote, err, checksum)) return false;
-    FillRemoteMeta(pr, remote, checksum);
-    if (!checksum) SaveCache(localDir, remote);
+    FillRemoteMeta(pr, remote, checksum, &cache);
+    // Simpan cache: selalu (baik biasa maupun checksum, agar hash tersimpan).
+    SaveCache(localDir, remote);
     return true;
 }
 
