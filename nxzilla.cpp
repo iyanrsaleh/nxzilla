@@ -272,6 +272,17 @@ static bool FileExists(const std::string& path) {
     return true;
 }
 
+// Apakah path ada (berkas ATAU folder)?
+static bool PathExists(const std::string& path) {
+#ifdef _WIN32
+    DWORD a = GetFileAttributesA(path.c_str());
+    return a != INVALID_FILE_ATTRIBUTES;
+#else
+    struct stat stt{};
+    return stat(path.c_str(), &stt) == 0;
+#endif
+}
+
 static std::string ReadFileText(const std::string& path) {
     FILE* f = fopen(path.c_str(), "rb");
     if (!f) return {};
@@ -1607,6 +1618,24 @@ static void FillRemoteMeta(const Profile& pr, std::vector<RemoteEntry>& out, boo
     }
 }
 
+// Cek keamanan path relatif: tolak segmen ".." (traversal) dan path absolut.
+static bool SafeRel(const std::string& rel) {
+    if (rel.empty()) return false;
+    if (rel[0] == '/' || rel[0] == '\\') return false;
+    if (rel.size() >= 2 && rel[1] == ':') return false;  // drive (Windows)
+    // pecah per '/', tolak ".."
+    size_t start = 0;
+    while (start <= rel.size()) {
+        size_t slash = rel.find('/', start);
+        std::string seg = (slash == std::string::npos) ? rel.substr(start)
+                                                       : rel.substr(start, slash - start);
+        if (seg == ".." || seg == ".") return false;
+        if (slash == std::string::npos) break;
+        start = slash + 1;
+    }
+    return true;
+}
+
 // Pola ignore minimal: cocokkan nama berkas/folder atau akhiran.
 static bool IsIgnored(const std::vector<std::string>& patterns, const std::string& rel) {
     // Selalu abaikan berkas internal Nxzilla.
@@ -2326,6 +2355,7 @@ static std::string TuiSync(AppState& st, const Project& proj, bool isPush) {
         std::string localFile = proj.localPath;
         if (localFile.back() != '/' && localFile.back() != '\\') localFile += kPathSep;
         std::string rel = it.rel;
+        if (!SafeRel(rel)) { skipped++; continue; }  // tolak traversal
         for (char& c : rel) if (c == '/') c = kPathSep;
         localFile += rel;
         std::string e2;
@@ -2739,9 +2769,26 @@ int main(int argc, char** argv) {
                 Out("nxzilla: profile '" + proj->profile + "' not found in connections.json.\n");
                 return 1;
             }
+            if (pr->host.empty()) {
+                Out("nxzilla: profile '" + pr->name + "' has no host configured.\n"
+                    "Run `nxzilla` -> press [c] to edit the profile.\n");
+                return 1;
+            }
             std::string effectivePath = proj->remotePath.empty() ? pr->remotePath : proj->remotePath;
             Profile use = *pr;
             use.remotePath = effectivePath;
+
+            // Registry basi: folder proyek hilang/dipindah.
+            if (!PathExists(proj->localPath)) {
+                if (a == "pull") {
+                    Out("nxzilla: local folder is missing; creating it:\n  " + proj->localPath + "\n");
+                    EnsureDir(proj->localPath);
+                } else if (a != "ls") {
+                    Out("nxzilla: local folder is missing (stale entry):\n  " + proj->localPath + "\n"
+                        "Use `nxzilla pull " + proj->name + "` to recreate it.\n");
+                    return 1;
+                }
+            }
 
             if (a == "ls") {
                 std::vector<std::string> names;
@@ -2832,6 +2879,7 @@ int main(int argc, char** argv) {
                     std::string localFile = proj->localPath;
                     if (localFile.back() != '/' && localFile.back() != '\\') localFile += kPathSep;
                     std::string rel = it.rel;
+                    if (!SafeRel(rel)) { Out("  \x1b[1;31m!\x1b[0m skipping unsafe path: " + rel + "\n"); continue; }
                     for (char& c : rel) if (c == '/') c = kPathSep;
                     localFile += rel;
                     size_t slash = it.rel.find_last_of('/');
@@ -2917,6 +2965,7 @@ int main(int argc, char** argv) {
                 std::string localFile = proj->localPath;
                 if (localFile.back() != '/' && localFile.back() != '\\') localFile += kPathSep;
                 std::string rel = it.rel;
+                if (!SafeRel(rel)) { Out("  \x1b[1;31m!\x1b[0m skipping unsafe path: " + rel + "\n"); continue; }
                 for (char& c : rel) if (c == '/') c = kPathSep;
                 localFile += rel;
                 size_t slash = localFile.find_last_of("/\\");
@@ -3031,6 +3080,7 @@ int main(int argc, char** argv) {
             const Profile* pr = nullptr;
             for (const auto& q : prs) if (q.name == proj->profile) { pr = &q; break; }
             if (!pr) { Out("nxzilla: profile not found.\n"); return 1; }
+            if (pr->host.empty()) { Out("nxzilla: profile '" + pr->name + "' has no host.\n"); return 1; }
             std::string effPath = proj->remotePath.empty() ? pr->remotePath : proj->remotePath;
             Profile use = *pr;
             use.remotePath = effPath;
@@ -3090,6 +3140,7 @@ int main(int argc, char** argv) {
             const Profile* pr = nullptr;
             for (const auto& q : prs) if (q.name == proj->profile) { pr = &q; break; }
             if (!pr) { Out("nxzilla: profile not found.\n"); return 1; }
+            if (pr->host.empty()) { Out("nxzilla: profile '" + pr->name + "' has no host.\n"); return 1; }
             std::string effPath = proj->remotePath.empty() ? pr->remotePath : proj->remotePath;
             Profile use = *pr;
             use.remotePath = effPath;
@@ -3179,6 +3230,12 @@ int main(int argc, char** argv) {
             SaveProjects(ps);
             Out("nxzilla: project '" + args[1] + "' removed from registry.\n");
             return 0;
+        }
+        // Perintah tak dikenal (kata diawali huruf, bukan flag) -> error + help.
+        if (!a.empty() && a[0] != '-' && a != "projects" && a != "list") {
+            Out("nxzilla: unknown command '" + a + "'.\n");
+            Out("Run `nxzilla --help` for usage.\n");
+            return 1;
         }
     }
 
