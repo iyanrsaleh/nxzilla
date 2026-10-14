@@ -11,7 +11,7 @@
 // Windows & Linux, satu basis kode. Backend koneksi memakai subprocess
 // OpenSSH (ssh/sftp/scp) sehingga tanpa dependensi pihak ketiga.
 
-#define NXZILLA_VERSION "1.0.0"
+#define NXZILLA_VERSION "1.1.0"
 
 #define _CRT_SECURE_NO_WARNINGS
 #include <cstdio>
